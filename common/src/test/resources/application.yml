@@ -1,0 +1,23 @@
+map-reduce:
+  master:
+    ip: 127.0.0.1:8080 # 主节点只有一个
+  workers:
+    info:
+      -
+        ip: 127.0.0.1:9090
+        region: 1
+        room: 1
+      - ip: 127.0.0.1:9090
+        region: 2 # 地区
+        room: 1 # 机房，为了做临近加载
+      - ip: 127.0.0.1:9090
+        region: 3
+        room: 2
+  file:
+    info:
+      -
+        ip: 127.0.0.1:8989
+        location: /home/yinan # 默认数据已经分片
+
+      - ip: 127.0.0.1:8989
+        location: /home/yinan

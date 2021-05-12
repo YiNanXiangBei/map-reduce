@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+import "result.proto";
+option java_multiple_files = true;
+option java_package = "org.yinan.grpc";
+option java_outer_classname = "MasterReceive";
+option java_generic_services = true;
+option java_generate_equals_and_hash = true;
+
+package org.yinan.grpc;
+
+message MapBackFeedEntry {
+  //key 分组key value key对应的值保存的文件位置，每个Key对应的数据会保存到一个单独的文件中
+  map<string, string> save_points = 1;
+}
+
+message ReduceBackFeedEntry {
+  //是否完成
+  bool finished = 1;
+  //完成的文件位置
+  string file_location = 2;
+  //额外信息
+  string message = 3;
+}
+
+
+service MasterReceiveService {
+  rpc mapNotify(MapBackFeedEntry) returns (org.yinan.grpc.ResultInfo) {}
+
+  rpc reduceNotify(ReduceBackFeedEntry) returns (org.yinan.grpc.ResultInfo) {}
+}

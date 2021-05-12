@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+import "result.proto";
+
+option java_multiple_files = true;
+option java_package = "org.yinan.grpc";
+option java_outer_classname = "WorkerReceive";
+option java_generic_services = true;
+option java_generate_equals_and_hash = true;
+
+package org.yinan.grpc;
+
+//master向map节点发送通知，告知执行哪台机器上的哪个文件
+message MapRemoteFileEntry {
+  string remote_ip = 1;
+  int32 remote_port = 2;
+  string file_name = 3;
+  string file_location = 4;
+}
+
+message ReduceRemoteEntry {
+  //key map节点的uri，val map节点保存文件的位置
+  map<string, string> resources = 1;
+}
+
+message HeartBeatInfo {
+  //上一次续约时间，确保消息没有漏掉
+  string last_renewal = 1;
+  //当前续约时间
+  string current_renewal = 2;
+}
+
+
+service WorkerReceiveService {
+  rpc mapReceiveSender(MapRemoteFileEntry) returns (org.yinan.grpc.ResultInfo) {}
+
+  rpc reduceReceiveSender(ReduceRemoteEntry) returns (org.yinan.grpc.ResultInfo) {}
+
+  rpc heartBeat(HeartBeatInfo) returns (org.yinan.grpc.ResultInfo) {}
+}
