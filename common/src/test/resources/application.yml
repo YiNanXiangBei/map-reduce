@@ -1,23 +1,37 @@
+grpc:
+  services:
+    -
+      name: master
+      port: 9999
+    -
+      name: worker
+      port: 8888
+
 map-reduce:
   master:
-    ip: 127.0.0.1:8080 # 主节点只有一个
+    ip: 127.0.0.1:9999 # 主节点只有一个
   workers:
-    info:
-      -
-        ip: 127.0.0.1:9090
-        region: 1
-        room: 1
-      - ip: 127.0.0.1:9090
-        region: 2 # 地区
-        room: 1 # 机房，为了做临近加载
-      - ip: 127.0.0.1:9090
-        region: 3
-        room: 2
-  file:
-    info:
+    -
+      ip: 127.0.0.1:8888
+      region: 1
+      room: 1
+    -
+      ip: 127.0.0.1:9090
+      region: 2 # 地区
+      room: 1 # 机房，为了做临近加载
+    -
+      ip: 127.0.0.1:9090
+      region: 3
+      room: 2
+  sharding:
+    infos:
       -
         ip: 127.0.0.1:8989
-        location: /home/yinan # 默认数据已经分片
-
-      - ip: 127.0.0.1:8989
-        location: /home/yinan
+        username: root
+        password: 123456
+        location: /home/yinan/1.txt # 默认数据已经分片
+      -
+        ip: 127.0.0.1:8989
+        username: root
+        password: 123456
+        location: /home/yinan/2.txt

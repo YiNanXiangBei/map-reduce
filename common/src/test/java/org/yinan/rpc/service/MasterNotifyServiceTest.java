@@ -1,15 +1,15 @@
 package org.yinan.rpc.service;
 
 
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 import org.junit.Before;
 import org.junit.Test;
+import org.yinan.config.context.ConfigContext;
+import org.yinan.config.entity.message.WorkerInfoDO;
 import org.yinan.grpc.HeartBeatInfo;
 import org.yinan.grpc.MapRemoteFileEntry;
 import org.yinan.grpc.ReduceRemoteEntry;
-import org.yinan.grpc.WorkerReceiveServiceGrpc;
-import org.yinan.grpc.WorkerReceiveServiceGrpc.WorkerReceiveServiceBlockingStub;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author yinan
@@ -17,53 +17,57 @@ import org.yinan.grpc.WorkerReceiveServiceGrpc.WorkerReceiveServiceBlockingStub;
  */
 public class MasterNotifyServiceTest {
 
-    private WorkerReceiveServiceBlockingStub blockingStub;
-
-    private MasterNotifyService notifyService;
+    private List<MasterNotifyService> notifyServices;
 
     @Before
-    public void before() {
-        ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder
-                .forAddress("127.0.0.1", 8888)
-                .usePlaintext();
-        ManagedChannel channel = channelBuilder.build();
-        blockingStub = WorkerReceiveServiceGrpc.newBlockingStub(channel);
-        notifyService = new MasterNotifyService(blockingStub);
+    public void setUp() {
+        List<WorkerInfoDO> workers = ConfigContext.getInstance().getWorkerInfos();
+        notifyServices = new ArrayList<>();
+        for (WorkerInfoDO workerInfo : workers) {
+            MasterNotifyService notifyService = new MasterNotifyService(workerInfo.getIp(), workerInfo.getPort());
+            notifyServices.add(notifyService);
+        }
     }
 
     @Test
     public void notifyMap() {
-        MapRemoteFileEntry request = MapRemoteFileEntry
-                .newBuilder()
-                .setFileLocation("/user/test")
-                .setFileName("test.txt")
-                .setRemoteIp("127.0.0.1:8080")
-                .setRemotePort(31001)
-                .build();
-        System.out.println(notifyService.notifyMap(request));
+        for (MasterNotifyService notifyService : notifyServices) {
+            MapRemoteFileEntry request = MapRemoteFileEntry
+                    .newBuilder()
+                    .setFileLocation("/user/test")
+                    .setFileName("test.txt")
+                    .setRemoteIp("127.0.0.1:8080")
+                    .setRemotePort(31001)
+                    .build();
+            System.out.println(notifyService.notifyMap(request));
+        }
     }
 
     public @Test
     void notifyReduce() {
-        ReduceRemoteEntry reduceRemoteEntry = ReduceRemoteEntry
-                .newBuilder()
-                .putResources("key1", "test1.txt")
-                .putResources("key2", "test1.txt")
-                .putResources("key3", "test1.txt")
-                .build();
-        System.out.println(notifyService.notifyReduce(reduceRemoteEntry));
+        for (MasterNotifyService notifyService : notifyServices) {
+            ReduceRemoteEntry reduceRemoteEntry = ReduceRemoteEntry
+                    .newBuilder()
+                    .putResources("key1", "test1.txt")
+                    .putResources("key2", "test1.txt")
+                    .putResources("key3", "test1.txt")
+                    .build();
+            System.out.println(notifyService.notifyReduce(reduceRemoteEntry));
+        }
     }
 
     @Test
     public void heartBeat() throws InterruptedException {
-        while (true) {
-            Thread.sleep(3000);
-            HeartBeatInfo heartBeatInfo = HeartBeatInfo
-                    .newBuilder()
-                    .setLastRenewal("1620830341")
-                    .setCurrentRenewal("1620830359")
-                    .build();
-            System.out.println(notifyService.heartBeat(heartBeatInfo));
+        for (MasterNotifyService notifyService : notifyServices) {
+            for (int i = 0; i < 3; i++) {
+                Thread.sleep(3000);
+                HeartBeatInfo heartBeatInfo = HeartBeatInfo
+                        .newBuilder()
+                        .setLastRenewal("1620830341")
+                        .setCurrentRenewal("1620830359")
+                        .build();
+                System.out.println(notifyService.heartBeat(heartBeatInfo));
+            }
         }
     }
 

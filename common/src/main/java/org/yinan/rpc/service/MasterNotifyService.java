@@ -1,5 +1,9 @@
 package org.yinan.rpc.service;
 
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.yinan.grpc.HeartBeatInfo;
 import org.yinan.grpc.MapRemoteFileEntry;
 import org.yinan.grpc.ReduceRemoteEntry;
@@ -13,23 +17,56 @@ import org.yinan.grpc.WorkerReceiveServiceGrpc;
  */
 public class MasterNotifyService {
 
+    private final static Logger LOGGER = LoggerFactory.getLogger(MasterNotifyService.class);
+
     private final WorkerReceiveServiceGrpc.WorkerReceiveServiceBlockingStub blockingStub;
 
-    public MasterNotifyService(WorkerReceiveServiceGrpc
-                                       .WorkerReceiveServiceBlockingStub blockingStub) {
-        this.blockingStub = blockingStub;
+    public MasterNotifyService(String ip, Integer port) {
+        ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder
+                .forAddress(ip, port)
+                .usePlaintext();
+        ManagedChannel channel = channelBuilder.build();
+        this.blockingStub = WorkerReceiveServiceGrpc.newBlockingStub(channel);
     }
 
     public ResultInfo notifyMap(MapRemoteFileEntry request) {
-        return blockingStub.mapReceiveSender(request);
+        try {
+            return blockingStub.mapReceiveSender(request);
+        } catch (Exception e) {
+            LOGGER.error("notify map worker error: {}", e.toString());
+            return ResultInfo.newBuilder()
+                    .setSuccess(false)
+                    .setCode(500)
+                    .setMessage("can not connect map worker")
+                    .build();
+        }
     }
 
     public ResultInfo notifyReduce(ReduceRemoteEntry request) {
-        return blockingStub.reduceReceiveSender(request);
+        try {
+            return blockingStub.reduceReceiveSender(request);
+        } catch (Exception e) {
+            LOGGER.error("notify reduce worker error: {}", e.toString());
+            return ResultInfo.newBuilder()
+                    .setSuccess(false)
+                    .setCode(500)
+                    .setMessage("can not connect reduce worker")
+                    .build();
+        }
     }
 
     public ResultInfo heartBeat(HeartBeatInfo heartBeatInfo) {
-        return blockingStub.heartBeat(heartBeatInfo);
+        try {
+            return blockingStub.heartBeat(heartBeatInfo);
+        } catch (Exception e) {
+            LOGGER.error("heartbeat with worker error: {}", e.toString());
+            return ResultInfo.newBuilder()
+                    .setSuccess(false)
+                    .setCode(500)
+                    .setMessage("can not connect worker")
+                    .build();
+        }
     }
+
 
 }
