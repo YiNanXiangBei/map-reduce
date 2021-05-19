@@ -19,4 +19,8 @@ public class WorkerInfoDO {
     private String region;
 
     private String room;
+
+    private String username;
+
+    private String password;
 }

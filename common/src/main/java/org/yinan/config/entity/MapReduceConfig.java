@@ -35,6 +35,10 @@ public class MapReduceConfig {
         private String region;
 
         private String room;
+
+        private String username;
+
+        private String password;
     }
 
     @Getter

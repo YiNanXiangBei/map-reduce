@@ -63,8 +63,8 @@ public class MasterNotifyServiceTest {
                 Thread.sleep(3000);
                 HeartBeatInfo heartBeatInfo = HeartBeatInfo
                         .newBuilder()
-                        .setLastRenewal("1620830341")
-                        .setCurrentRenewal("1620830359")
+                        .setLastRenewal(1620830341)
+                        .setCurrentRenewal(1620830359)
                         .build();
                 System.out.println(notifyService.heartBeat(heartBeatInfo));
             }

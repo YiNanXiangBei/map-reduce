@@ -65,7 +65,8 @@ public class ShellUtils {
      */
     public static boolean scpUpload(String remoteIp, Integer port,
                                     String username, String password,
-                                    String remoteFileName, String localFileName) {
+                                    String remoteFileName, String localFileName,
+                                    String exec) {
         SSHClient sshClient = new SSHClient();
         try {
             sshClient.addHostKeyVerifier(new PromiscuousVerifier());
@@ -73,6 +74,7 @@ public class ShellUtils {
             sshClient.authPassword(username, password);
             sshClient.newSCPFileTransfer().upload(localFileName,
                     remoteFileName);
+            exec(sshClient, exec);
             return true;
         } catch (Exception e) {
             LOGGER.error("scp upload remote {} error: {}", remoteIp, e.toString());
@@ -112,7 +114,7 @@ public class ShellUtils {
     }
 
     public static boolean exec(SSHClient sshClient, String exec) {
-        Session session = null;
+        Session session;
         try {
             session = sshClient.startSession();
             session.exec(exec);

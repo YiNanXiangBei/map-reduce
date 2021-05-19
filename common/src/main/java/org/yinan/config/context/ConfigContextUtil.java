@@ -73,6 +73,8 @@ public class ConfigContextUtil {
             String[] ipInfo = ip.split(":");
             workerInfoDO.setIp(ipInfo[0]);
             workerInfoDO.setPort(Integer.parseInt(ipInfo[1]));
+            workerInfoDO.setUsername(workerInfo.getUsername());
+            workerInfoDO.setPassword(workerInfo.getPassword());
             workerInfoDOS.add(workerInfoDO);
         }
 

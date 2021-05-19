@@ -16,6 +16,8 @@ message MapRemoteFileEntry {
   int32 remote_port = 2;
   string file_name = 3;
   string file_location = 4;
+  string username = 5;
+  string password = 6;
 }
 
 message ReduceRemoteEntry {
@@ -25,9 +27,9 @@ message ReduceRemoteEntry {
 
 message HeartBeatInfo {
   //上一次续约时间，确保消息没有漏掉
-  string last_renewal = 1;
+  int64 last_renewal = 1;
   //当前续约时间
-  string current_renewal = 2;
+  int64 current_renewal = 2;
 }
 
 

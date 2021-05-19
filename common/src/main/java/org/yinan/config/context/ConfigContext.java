@@ -10,6 +10,7 @@ import org.yinan.config.resolve.IResolver;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * @author yinan
@@ -25,13 +26,13 @@ public class ConfigContext {
         workerInfos = ConfigContextUtil.convert2WorkerInfo(systemConfig.getMapReduce().getWorkers());
     }
 
-    private Map<String, RpcDO> rpcInfos;
+    private final Map<String, RpcDO> rpcInfos;
 
-    private MasterInfoDO masterInfo;
+    private final MasterInfoDO masterInfo;
 
-    private List<FileSystemDO> fileSystems;
+    private final List<FileSystemDO> fileSystems;
 
-    private List<WorkerInfoDO> workerInfos;
+    private final List<WorkerInfoDO> workerInfos;
 
     public Map<String, RpcDO> getRpcInfos() {
         return rpcInfos;
@@ -55,6 +56,11 @@ public class ConfigContext {
 
     private static class Inner {
         private final static ConfigContext INSTANCE = new ConfigContext();
+    }
+
+    public Map<String, List<FileSystemDO>> getMapFileSystems() {
+        return fileSystems.stream().collect(Collectors.groupingBy(file ->
+                file.getIp() + "::" + file.getLocation()));
     }
 
 }
