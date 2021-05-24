@@ -24,13 +24,7 @@ public class WorkerNotifyServiceTest {
 
     @Test
     public void mapNotify() {
-        MapBackFeedEntry backFeedEntry = MapBackFeedEntry.newBuilder()
-                .putSavePoints("key1", "test.txt")
-                .putSavePoints("key2", "test.txt")
-                .putSavePoints("key3", "test.txt")
-                .putSavePoints("key4", "test.txt")
-                .build();
-        System.out.println(notifyService.mapNotify(backFeedEntry));
+
     }
 
     @Test

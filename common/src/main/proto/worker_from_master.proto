@@ -21,9 +21,13 @@ message MapRemoteFileEntry {
 }
 
 message ReduceRemoteEntry {
-  //key map节点的uri，val map节点保存文件的位置
-  map<string, string> resources = 1;
+  //记录map处理结果集合
+  repeated MapRemoteFileEntry mapDealInfo = 1;
+
+  repeated string keys = 2;
+
 }
+
 
 message HeartBeatInfo {
   //上一次续约时间，确保消息没有漏掉

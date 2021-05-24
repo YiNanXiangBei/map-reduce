@@ -2,6 +2,7 @@ package org.yinan.io;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,6 +63,16 @@ public class FileStreamUtil {
         return null;
     }
 
+    public static <T> T load(TypeReference<T> typeReference, String fileName) {
+        try {
+            String jsonString  = readJsonFile(fileName);
+            return JSON.parseObject(jsonString, typeReference);
+        } catch (IOException e) {
+            LOGGER.error("load json to map error: {}", e.toString());
+        }
+        return null;
+    }
+
 
     public static String readJsonFile(String fileName) throws IOException {
         String jsonStr;
@@ -90,5 +101,10 @@ public class FileStreamUtil {
             }
         }
         return exist;
+    }
+
+    public static boolean deleteFile(String fileName) {
+        File file = new File(fileName);
+        return file.delete();
     }
 }

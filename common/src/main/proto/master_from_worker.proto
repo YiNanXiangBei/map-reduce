@@ -10,10 +10,23 @@ option java_generate_equals_and_hash = true;
 package org.yinan.grpc;
 
 message MapBackFeedEntry {
-  //key 分组key value key对应的值保存的文件位置，每个Key对应的数据会保存到一个单独的文件中
-  map<string, string> save_points = 1;
+  string ip = 1;
+  //文件系统全限定名称，文件系统ip::文件全限定名称
+  string file_system_location = 2;
 
-  bool success = 2;
+  repeated DealFile dea_files = 3;
+
+  //花费时间，单位毫秒
+  int32 spend_time = 4;
+
+  bool success = 5;
+}
+
+message DealFile {
+  //全限定名称
+  string file_name = 1;
+  //处理keys集合
+  repeated string keys = 2;
 }
 
 message ReduceBackFeedEntry {
@@ -23,6 +36,8 @@ message ReduceBackFeedEntry {
   string file_location = 2;
   //额外信息
   string message = 3;
+  //执行数据的机器ip
+  string ip = 4;
 }
 
 

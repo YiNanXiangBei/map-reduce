@@ -1,5 +1,6 @@
 package org.yinan.common;
 
+import com.alibaba.fastjson.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yinan.common.entity.FileExecInfo;
@@ -7,10 +8,12 @@ import org.yinan.common.entity.WorkerInfo;
 import org.yinan.config.context.ConfigContext;
 import org.yinan.config.entity.message.FileSystemDO;
 import org.yinan.config.entity.message.WorkerInfoDO;
+import org.yinan.grpc.DealFile;
 import org.yinan.grpc.HeartBeatInfo;
 import org.yinan.grpc.MapBackFeedEntry;
 import org.yinan.grpc.MapRemoteFileEntry;
 import org.yinan.grpc.ReduceBackFeedEntry;
+import org.yinan.grpc.ReduceRemoteEntry;
 import org.yinan.grpc.ResultInfo;
 import org.yinan.io.FileStreamUtil;
 import org.yinan.io.ShellUtils;
@@ -20,18 +23,20 @@ import org.yinan.rpc.service.callback.ICallBack;
 import org.yinan.util.ConvertUtil;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -43,17 +48,19 @@ public class ServiceStart {
 
     private final Executor executor;
 
+    /**
+     * map节点心跳检测任务开启
+     */
+    private ScheduledFuture<?> mapScheduleFuture;
+
+    /**
+     * reduce节点心跳检测任务开启
+     */
+    private ScheduledFuture<?> reduceScheduleFuture;
+
     private final ScheduledExecutorService scheduledExecutorService;
 
     private final static String FILE_FLAG = "FILE_FLAG";
-
-    private final static String MAP_IP = "map_ip";
-
-    private final static String MAP_PORT = "map_port";
-
-    private final static String MAP_FILE_LOCATION = "map_file_location";
-
-    private final static String SPEND_TIME = "spend_time";
 
     private ConfigManager configManager;
 
@@ -64,6 +71,10 @@ public class ServiceStart {
      */
     private final Map<String, WorkerInfoDO> ALIVE_WORKER = new ConcurrentHashMap<>();
 
+    /**
+     * 记录map处理文件结果
+     */
+    private final List<MapRemoteFileEntry> mapRemoteFileEntries = new CopyOnWriteArrayList<>();
     /**
      * 心跳检测信息记录 -- 持久化
      * 如果出现节点三次没有响应，那么直接将该节点丢弃
@@ -91,7 +102,11 @@ public class ServiceStart {
         } catch (Exception e) {
             LOGGER.error("can not start master : {}", e.toString());
         } finally {
+            configManager.addSceneSnapshot(Constant.FINISHED_TASK, true);
             //销毁之前创建的文件
+            if (!FileStreamUtil.deleteFile(FILE_FLAG)) {
+                LOGGER.error("can not clear file: {}", FILE_FLAG);
+            }
         }
     }
 
@@ -118,7 +133,7 @@ public class ServiceStart {
                 WorkerInfo info = ConvertUtil.convert(workerInfo);
                 configManager.addFailedWorker(info);
             } else {
-                ALIVE_WORKER.put(workerInfo.getIp() + "::" + workerInfo.getPort(),
+                ALIVE_WORKER.put(workerInfo.getIp(),
                         workerInfo);
             }
         });
@@ -150,20 +165,18 @@ public class ServiceStart {
             for (Map.Entry<String, WorkerInfo> entry : aliveWorkers.entrySet()) {
                 if (mapCount > 0) {
                     configManager.addMapWorker(entry.getKey(), entry.getValue());
-                    mapCount --;
+                    mapCount--;
                 } else {
-                    configManager.addReduceWorker(entry.getValue());
+                    configManager.addReduceWorker(entry.getKey(), entry.getValue());
                 }
             }
 
         }
         //初始化文件映射
         initFileOwner();
-        //通知map节点执行map任务
+        configManager.addSceneSnapshot(Constant.STARTED_TASK, true);
+        //通知map节点执行map任务，map节点执行成功会调用reduce节点任务
         notifyMapNode();
-        //通知reduce节点执行reduce任务
-
-
     }
 
     /**
@@ -171,6 +184,14 @@ public class ServiceStart {
      */
     private void onlyProcessingTaskInit() {
         //从文件中读取数据并塞到内存
+        load();
+        //判断任务是否分配，如果任务还没有分配，执行初始化逻辑
+        //任务已经分配，判断节点是否完成执行，若未完成，调用notify执行逻辑
+        if (configManager.getSceneSnapshot(Constant.STARTED_TASK) == null) {
+            onlyNewTaskInit();
+        } else if (configManager.getSceneSnapshot(Constant.FINISHED_TASK) == null) {
+            notifyMapNode();
+        }
     }
 
 
@@ -182,38 +203,72 @@ public class ServiceStart {
         masterReceiver.register(MasterReceiver.MAP_NOTIFY, new ICallBack<MapBackFeedEntry>() {
             @Override
             public void call(MapBackFeedEntry mapBackFeedEntry) {
+                String ip = mapBackFeedEntry.getIp();
+                WorkerInfoDO workerInfoDO = ALIVE_WORKER.get(ip);
                 //结构：ip::port
-                String ip = mapBackFeedEntry.getSavePointsMap().get(MAP_IP) + "::"
-                        + mapBackFeedEntry.getSavePointsMap().get(MAP_PORT);
+                String ipPort = ip + "::" + workerInfoDO.getPort();
                 if (mapBackFeedEntry.getSuccess()) {
                     //表示某个map节点处理成功，将结果保存到map中，同时将处理成功的文件清除
-                    String fileLocation = mapBackFeedEntry.getSavePointsMap().get(MAP_FILE_LOCATION);
+                    //该location表示的是文件系统中的location
+                    String fileLocation = mapBackFeedEntry.getFileSystemLocation();
                     configManager.remove(fileLocation);
-                    configManager.removeFileOwner(ip);
-                    int spendTime = Integer.parseInt(mapBackFeedEntry.getSavePointsMap().get(SPEND_TIME));
+                    configManager.removeFileOwner(ipPort);
+
+                    List<DealFile> dealFileList = mapBackFeedEntry.getDeaFilesList();
+
                     FileExecInfo execInfo = new FileExecInfo();
-                    execInfo.setRunId(ip);
+                    execInfo.setRunId(ipPort);
                     execInfo.setStatus("success");
                     execInfo.setFileName(fileLocation);
-                    execInfo.setSavePoints(mapBackFeedEntry.getSavePointsMap());
-                    execInfo.setExecTime(spendTime);
+                    execInfo.setExecTime(mapBackFeedEntry.getSpendTime());
+                    execInfo.setDealFiles(dealFileList);
                     configManager.addSuccess(ip + "::" + fileLocation, execInfo);
+                    //统计key值信息，不过多考虑，仅仅使用逗号分割key
+                    List<String> keys = dealFileList
+                            .stream()
+                            .map(DealFile::getKeysList)
+                            .flatMap(Collection::stream)
+                            .collect(Collectors.toList());
+                    configManager.addAllKeys(keys);
+                    dealFileList.forEach(file -> {
+                        //记录哪台机器处理之后的文件信息有哪些
+                        mapRemoteFileEntries.add(MapRemoteFileEntry
+                                .newBuilder()
+                                .setRemoteIp(ip)
+                                .setRemotePort(22)
+                                .setUsername(workerInfoDO.getUsername())
+                                .setPassword(workerInfoDO.getPassword())
+                                .setFileName(file.getFileName())
+                                .build()
+                        );
+                    });
                 } else {
-                    checkRetryTimes(ip);
+                    checkMapRetryTimes(ipPort);
                 }
-
-
 
             }
         }).register(MasterReceiver.REDUCE_NOTIFY, new ICallBack<ReduceBackFeedEntry>() {
 
             @Override
             public void call(ReduceBackFeedEntry reduceBackFeedEntry) {
-
+                String ip = reduceBackFeedEntry.getIp();
+                //输出reduce结果
+                if (reduceBackFeedEntry.getFinished()) {
+                    System.out.println("reduce node :" + ip + "has finished," +
+                            "file has been saved in : " + reduceBackFeedEntry.getFileLocation());
+                    //清除该reduce节点任务
+                    configManager.removeReduceKey(ip);
+                    //标记该节点已完成任务
+                    configManager.addFinishedReduceTask(ip);
+                } else {
+                    reduceFailDeal(ip);
+                }
             }
         }).finished();
 
     }
+
+
 
     private void initFileOwner() {
         List<FileSystemDO> files = ConfigContext.getInstance().getFileSystems();
@@ -228,57 +283,118 @@ public class ServiceStart {
      * 暂时单开线程做
      */
     private void notifyMapNode() {
+        //map节点循环检测，判断是否存在未完成任务
         executor.execute(new NotifyMap());
         //心跳检测，每3秒钟检测一次
-        scheduledExecutorService.scheduleAtFixedRate(new HeartBeatCheck(), 2000,
+        mapScheduleFuture = scheduledExecutorService.scheduleAtFixedRate(new MapHeartBeatCheck(), 2000,
                 3000, TimeUnit.MILLISECONDS);
     }
 
     private void notifyReduceNode() {
-
+        //通知reduce节点执行任务
+        executor.execute(new NotifyReduce());
+        reduceScheduleFuture = scheduledExecutorService.scheduleAtFixedRate(new ReduceHeartBeatCheck(), 2000,
+                3000, TimeUnit.MILLISECONDS);
     }
 
-    private void checkRetryTimes(String ipInfo) {
-        int retryTimes = configManager.retryTimes(ipInfo);
+    /**
+     * map节点心跳检测
+     * @param ipPort
+     */
+    private void checkMapRetryTimes(String ipPort) {
+        int retryTimes = configManager.retryTimes(ipPort);
         if (retryTimes > 3) {
             //将当前节点从存活节点剔除
-            String fileInfo = configManager.getFileDoingOwner(ipInfo);
+            String fileInfo = configManager.getFileDoingOwner(ipPort);
             //移除该节点执行文件信息
-            configManager.removeFileOwner(ipInfo);
+            configManager.removeFileOwner(ipPort);
             //将其正在执行的文件重置为未执行
             configManager.addWorkerDoingFile(fileInfo, null);
             //从存活节点中移除
-            configManager.removeMapWorker(ipInfo);
+            configManager.removeMapWorker(ipPort);
         } else {
-            configManager.addRetryTimes(ipInfo, retryTimes + 1);
+            configManager.addRetryTimes(ipPort, retryTimes + 1);
         }
     }
 
     /**
-     * 心跳检测类
+     * reduce节点心跳检测
      */
-    class HeartBeatCheck implements Runnable {
+    private void checkReduceRetryTimes(String ip, Integer port) {
+        String ipPort = ip + "::" + port;
+        int retryTimes = configManager.retryTimes(ipPort);
+        if (retryTimes > 3) {
+            //将当前节点从存活节点剔除
+            reduceFailDeal(ip);
+        } else {
+            configManager.addRetryTimes(ipPort, retryTimes + 1);
+        }
+    }
+
+    /**
+     * map节点心跳检测类
+     */
+    class MapHeartBeatCheck implements Runnable {
 
         @Override
         public void run() {
-            //map节点心跳检测
-            long currentTime = System.currentTimeMillis();
-            configManager.getAllMapWorkers().values().forEach(info -> {
-                String ipInfo = info.getIp() + "::" + info.getPort();
-                ResultInfo resultInfo = new MasterNotifyService(info.getIp(), info.getPort())
-                        .heartBeat(HeartBeatInfo.newBuilder()
-                                .setCurrentRenewal(currentTime)
-                                .setLastRenewal(lastHeartBeatRenew(ipInfo))
-                                .build());
-                //记录最新的心跳时间
-                addHeartBestInfo(ipInfo, currentTime);
-                if (!resultInfo.getSuccess()) {
-                    //worker节点需要比较master节点上一次发送的时间是否和其接收的时间匹配，如果匹配那么返回true
-                    //返回false表示不匹配或者master节点根本连不上，需要记录重试次数，如果超过对应重试次数，那么直接下线
-                    checkRetryTimes(ipInfo);
+            if (configManager.workerDoingFileIsNotEmpty()) {
+                //map节点心跳检测
+                long currentTime = System.currentTimeMillis();
+                configManager.getAllMapWorkers().values().forEach(info -> {
+                    String ipPort = info.getIp() + "::" + info.getPort();
+                    ResultInfo resultInfo = new MasterNotifyService(info.getIp(), info.getPort())
+                            .heartBeat(HeartBeatInfo.newBuilder()
+                                    .setCurrentRenewal(currentTime)
+                                    .setLastRenewal(lastHeartBeatRenew(ipPort))
+                                    .build());
+                    //记录最新的心跳时间
+                    addHeartBestInfo(ipPort, currentTime);
+                    if (!resultInfo.getSuccess()) {
+                        //worker节点需要比较master节点上一次发送的时间是否和其接收的时间匹配，如果匹配那么返回true
+                        //返回false表示不匹配或者master节点根本连不上，需要记录重试次数，如果超过对应重试次数，那么直接下线
+                        checkMapRetryTimes(ipPort);
 
-                }
-            });
+                    }
+                });
+            } else {
+                //停止定时任务
+                mapScheduleFuture.cancel(false);
+            }
+        }
+    }
+
+    /**
+     * reduce节点心跳检测
+     */
+    class ReduceHeartBeatCheck implements Runnable {
+
+        @Override
+        public void run() {
+            if (!configManager.reduceKeyIsEmpty()) {
+                //不为空发送心跳检测，表面reduce任务开始执行
+                //map节点心跳检测
+                long currentTime = System.currentTimeMillis();
+                configManager.getAllReduceWorkers().values().forEach(info -> {
+                    String ipPort = info.getIp() + "::" + info.getPort();
+                    ResultInfo resultInfo = new MasterNotifyService(info.getIp(), info.getPort())
+                            .heartBeat(HeartBeatInfo.newBuilder()
+                                    .setCurrentRenewal(currentTime)
+                                    .setLastRenewal(lastHeartBeatRenew(ipPort))
+                                    .build());
+                    //记录最新的心跳时间
+                    addHeartBestInfo(ipPort, currentTime);
+                    if (!resultInfo.getSuccess()) {
+                        //worker节点需要比较master节点上一次发送的时间是否和其接收的时间匹配，如果匹配那么返回true
+                        //返回false表示不匹配或者master节点根本连不上，需要记录重试次数，如果超过对应重试次数，那么直接下线
+                        checkReduceRetryTimes(info.getIp(), info.getPort());
+
+                    }
+                });
+            } else {
+                //停止定时任务
+                reduceScheduleFuture.cancel(false);
+            }
         }
     }
 
@@ -290,7 +406,7 @@ public class ServiceStart {
         @Override
         public void run() {
             //不为空说明文件没有处理完成
-            while (!configManager.workerDoingFileIsEmpty()) {
+            while (configManager.workerDoingFileIsNotEmpty()) {
                 Queue<WorkerInfo> queue = new LinkedList<>(configManager.getAllAliveWorkerList());
                 Map<String, String> ownerDoingFiles = configManager.allOwnerDoingFiles();
                 Map<String, List<FileSystemDO>> fileSystems = ConfigContext.getInstance().getMapFileSystems();
@@ -298,33 +414,37 @@ public class ServiceStart {
                     if (entry.getValue() == null) {
                         //说明该文件还没有被处理
                         WorkerInfo worker = queue.poll();
-                        if (worker != null &&
-                                !configManager.containsFileOwner(worker.getIp() + "::" + worker.getPort())) {
-                            FileSystemDO file = fileSystems.get(entry.getKey()).get(0);
-                            MapRemoteFileEntry remoteFileEntry = MapRemoteFileEntry
-                                    .newBuilder()
-                                    .setFileLocation(file.getLocation())
-                                    .setRemoteIp(file.getIp())
-                                    .setRemotePort(file.getPort())
-                                    .setUsername(file.getUsername())
-                                    .setPassword(file.getPassword())
-                                    .build();
-
-                            new MasterNotifyService(worker.getIp(), worker.getPort())
-                                    .notifyMap(remoteFileEntry);
-                            String workerInfo = worker.getIp() + "::" + worker.getPort();
-                            String fileInfo = entry.getKey();
-                            //哪个文件被哪个worker处理
-                            configManager.addWorkerDoingFile(fileInfo, workerInfo);
-                            //哪个worker处理哪个文件
-                            configManager.addFileOwner(workerInfo, fileInfo);
-
+                        //如果没有节点满足要求，自旋
+                        while (worker == null ||
+                                configManager.containsFileOwner(worker.getIp() + "::" + worker.getPort())) {
+                            queue.offer(worker);
+                            worker = queue.poll();
                         }
-                        queue.offer(worker);
+                        //机器没有正在处理文件
+                        FileSystemDO file = fileSystems.get(entry.getKey()).get(0);
+                        MapRemoteFileEntry remoteFileEntry = MapRemoteFileEntry
+                                .newBuilder()
+                                .setFileLocation(file.getLocation())
+                                .setRemoteIp(file.getIp())
+                                .setRemotePort(file.getPort())
+                                .setUsername(file.getUsername())
+                                .setPassword(file.getPassword())
+                                .build();
+
+                        new MasterNotifyService(worker.getIp(), worker.getPort())
+                                .notifyMap(remoteFileEntry);
+                        String workerInfo = worker.getIp() + "::" + worker.getPort();
+                        String fileInfo = entry.getKey();
+                        //哪个文件被哪个worker处理
+                        configManager.addWorkerDoingFile(fileInfo, workerInfo);
+                        //哪个worker处理哪个文件
+                        configManager.addFileOwner(workerInfo, fileInfo);
                     }
 
                 }
             }
+            //说明所有map任务已经执行完成了，可以进行reduce节点的任务处理
+            notifyReduceNode();
         }
     }
 
@@ -335,18 +455,131 @@ public class ServiceStart {
 
         @Override
         public void run() {
+            Map<String, WorkerInfo> reduceWorkers = configManager.getAllReduceWorkers();
+            if (reduceWorkers.isEmpty()) {
+                //说明节点数量过少
+                reduceWorkers = configManager.getAllMapWorkers();
+            }
+            if (reduceWorkers.isEmpty()) {
+                throw new RuntimeException("reduce workers is empty!");
+            }
+            List<String> allKeys = new ArrayList<>(configManager.getAllKeys());
+            //分配任务
+            int offset = allKeys.size() / reduceWorkers.size();
+            int startIndex = 0;
+            int remainder = allKeys.size() % reduceWorkers.size();
+            //向所有reduce节点发送请求告知分别去这些节点上获取已经分类的数据
+            for (Map.Entry<String, WorkerInfo> entry : reduceWorkers.entrySet()) {
+                String ip = entry.getKey();
+                WorkerInfo workerInfo = entry.getValue();
+                List<String> subList;
+                if (remainder > 0) {
+                    subList = allKeys.subList(startIndex, offset + startIndex + 1);
+                    remainder --;
+                    startIndex += offset + 1;
+                } else {
+                    subList = allKeys.subList(startIndex, offset + startIndex);
+                    startIndex += offset;
+                }
+                if (configManager.ipHasDoing(ip)) {
+                    continue;
+                }
+                configManager.addReduceKey(ip, subList);
+
+                ReduceRemoteEntry reduceRemoteEntry = ReduceRemoteEntry.newBuilder()
+                        .addAllMapDealInfo(mapRemoteFileEntries)
+                        .build();
+                new MasterNotifyService(workerInfo.getIp(), workerInfo.getPort())
+                        .notifyReduce(reduceRemoteEntry);
+            }
 
         }
     }
 
-    private void addHeartBestInfo(String ipInfo,  Long lastRenew) {
+    private void reduceFailDeal(String oldIp) {
+        //换节点重试
+        List<String> aliveReduces = configManager.getAllFinishedReduceTaskMachine();
+        while (aliveReduces.isEmpty()) {
+            try {
+                TimeUnit.MILLISECONDS.sleep(3000);
+            } catch (InterruptedException e) {
+                //异常无所谓
+            }
+        }
+        String newIp = aliveReduces.get(0);
+        aliveReduces.remove(newIp);
+        List<String> keys = configManager.getReduceKeys(oldIp);
+        configManager.addReduceKey(newIp, keys);
+        WorkerInfo workerInfo = configManager.getReduceWorkerInfo(newIp);
+        ReduceRemoteEntry reduceRemoteEntry = ReduceRemoteEntry.newBuilder()
+                .addAllMapDealInfo(mapRemoteFileEntries)
+                .build();
+        new MasterNotifyService(workerInfo.getIp(), workerInfo.getPort())
+                .notifyReduce(reduceRemoteEntry);
+        configManager.removeReduceKey(oldIp);
+    }
+
+
+    /**
+     * 异步持久化数据
+     */
+    private void saveSync() {
+       boolean result = FileStreamUtil.save(configManager.getAllFileDoingOwner(), Constant.FILE_DOING_OWNER);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllSuccess(), Constant.SUCCESS_FILE);
+       assert result;
+       result = FileStreamUtil.save(configManager.allOwnerDoingFiles(), Constant.OWNER_DOING_FILE);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllMapWorkers(), Constant.MAP_WORKER_INFO);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllReduceWorkers(), Constant.REDUCE_WORKER_INFO);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllAliveWorkerList(), Constant.ALIVE_WORKER);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllKeys(), Constant.ALL_KEYS);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllFinishedReduceTaskMachine(), Constant.FINISHED_REDUCE_TASK);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllReduceKeys(), Constant.REDUCE_KEY);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllSceneSnapshot(), Constant.REDUCE_KEY);
+       assert result;
+    }
+
+    /**
+     * 加载数据到内存
+     */
+    private void load() {
+        configManager.addAllSuccess(FileStreamUtil.load(new TypeReference<Map<String, FileExecInfo>>() {},
+                Constant.SUCCESS_FILE));
+        configManager.addAllFileOwner(FileStreamUtil.load(new TypeReference<Map<String, String>>() {},
+                Constant.FILE_DOING_OWNER));
+        configManager.addAllWorkerDoingFiles(FileStreamUtil.load(new TypeReference<Map<String, String>>() {},
+                Constant.OWNER_DOING_FILE));
+        configManager.addAllMapWorkers(FileStreamUtil.load(new TypeReference<Map<String, WorkerInfo>>() {},
+                Constant.MAP_WORKER_INFO));
+        configManager.addAllReduceWorkers(FileStreamUtil.load(new TypeReference<Map<String, WorkerInfo>>() {},
+                Constant.REDUCE_WORKER_INFO));
+        configManager.addAllAliveWorkers(FileStreamUtil.load(new TypeReference<Map<String, WorkerInfo>>() {},
+                Constant.ALIVE_WORKER));
+        configManager.addAllKeys(FileStreamUtil.load(new TypeReference<List<String>>() {},
+                Constant.ALL_KEYS));
+        configManager.addAllFinishedReduceTasks(FileStreamUtil.load(new TypeReference<List<String>>() {},
+                Constant.FINISHED_REDUCE_TASK));
+        configManager.addAllReduceKeys(FileStreamUtil.load(new TypeReference<Map<String, List<String>>>() {},
+                Constant.REDUCE_KEY));
+        configManager.addAllSceneSnapshot(FileStreamUtil.load(new TypeReference<Map<String, Boolean>>() {},
+                Constant.SCENE_SNAPSHOT));
+    }
+
+
+    private void addHeartBestInfo(String ipInfo, Long lastRenew) {
         WORKER_HEART_BEATS_INFOS.put(ipInfo, lastRenew);
     }
 
     private Long lastHeartBeatRenew(String ipInfo) {
         return WORKER_HEART_BEATS_INFOS.getOrDefault(ipInfo, 0L);
     }
-
 
 
 }

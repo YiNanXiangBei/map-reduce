@@ -2,7 +2,9 @@ package org.yinan.common.entity;
 
 import lombok.Getter;
 import lombok.Setter;
+import org.yinan.grpc.DealFile;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,7 +38,7 @@ public class FileExecInfo {
     private Integer execTime;
 
     /**
-     * map节点执行成功之后文件保存点
+     * 处理的文件信息
      */
-    private Map<String, String> savePoints;
+    private List<DealFile> dealFiles;
 }

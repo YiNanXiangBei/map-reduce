@@ -48,9 +48,7 @@ public class MasterNotifyServiceTest {
         for (MasterNotifyService notifyService : notifyServices) {
             ReduceRemoteEntry reduceRemoteEntry = ReduceRemoteEntry
                     .newBuilder()
-                    .putResources("key1", "test1.txt")
-                    .putResources("key2", "test1.txt")
-                    .putResources("key3", "test1.txt")
+                    .addMapDealInfo(MapRemoteFileEntry.newBuilder().setRemoteIp("127.0.0.1").build())
                     .build();
             System.out.println(notifyService.notifyReduce(reduceRemoteEntry));
         }
