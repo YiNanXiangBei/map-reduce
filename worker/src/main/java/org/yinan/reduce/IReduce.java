@@ -15,6 +15,6 @@ public interface IReduce {
      * @param content 待处理任务
      * @return
      */
-    Map<String, Object> reduce(String content, List<String> keys);
+    Map<String, Object> reduce(Map<String, Object> content, List<String> keys);
 
 }

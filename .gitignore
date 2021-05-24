@@ -74,3 +74,4 @@ fabric.properties
 /map-reduce.iml
 /worker/worker.iml
 /master/master.iml
+/word-count/word-count.iml

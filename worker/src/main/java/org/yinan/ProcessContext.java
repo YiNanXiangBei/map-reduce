@@ -10,13 +10,13 @@ import org.yinan.reduce.IReduce;
 public class ProcessContext {
     private static IMap map;
 
-    private static IReduce<?> reduce;
+    private static IReduce reduce;
 
     public static IMap getMap() {
         return map;
     }
 
-    public static IReduce<?> getReduce() {
+    public static IReduce getReduce() {
         return reduce;
     }
 
@@ -24,7 +24,7 @@ public class ProcessContext {
         map = iMap;
     }
 
-    public static void registerReduce(IReduce<?> iReduce) {
+    public static void registerReduce(IReduce iReduce) {
         reduce = iReduce;
     }
 }

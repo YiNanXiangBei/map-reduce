@@ -1,5 +1,6 @@
 package org.yinan.reduce;
 
+import com.alibaba.fastjson.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yinan.ProcessContext;
@@ -57,10 +58,10 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
             ShellUtils.scpDownload(mapIp, mapPort, userName, password,
                     fileName, localFile);
             try {
-                String content = FileStreamUtil.readJsonFile(localFile);
+                Map<String, Object> mapContent = FileStreamUtil.load(new TypeReference<Map<String, Object>>() {}, localFile);
                 IReduce reduce = ProcessContext.getReduce();
-                results.putAll(reduce.reduce(content, reduceRemoteEntry.getKeysList()));
-            } catch (IOException e) {
+                results.putAll(reduce.reduce(mapContent, reduceRemoteEntry.getKeysList()));
+            } catch (Exception e) {
                 LOGGER.error("load local file error: {}", e.toString());
                 new WorkerNotifyService()
                         .reduceNotify(ReduceBackFeedEntry.newBuilder()
