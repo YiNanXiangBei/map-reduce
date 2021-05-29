@@ -38,6 +38,11 @@ public class WorkerReceiveServiceImplTest {
         }).register(WorkerReceiver.MAP_RECEIVER_SENDER, new ICallBack<MapRemoteFileEntry>() {
             @Override
             public void call(MapRemoteFileEntry mapRemoteFileEntry) {
+                try {
+                    Thread.sleep(10000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
                 System.out.println(mapRemoteFileEntry);
             }
         }).register(WorkerReceiver.REDUCE_RECEIVER_SENDER, new ICallBack<ReduceRemoteEntry>() {

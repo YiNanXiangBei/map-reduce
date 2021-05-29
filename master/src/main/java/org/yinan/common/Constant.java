@@ -29,4 +29,8 @@ public class Constant {
     public final static String STARTED_TASK = "STARTED_TASK";
 
     public final static String FINISHED_TASK = "FINISHED_TASK";
+
+    public final static String FINISHED_REDUCE_TASK_KEY = "FINISHED_REDUCE_TASK_KEY";
+
+    public final static String ALL_KEYS_KEY = "ALL_KEYS_KEY";
 }

@@ -18,6 +18,9 @@ import java.util.Map;
  */
 public class ConfigContextUtil {
     public static List<FileSystemDO> convert2FileSystem(MapReduceConfig.Sharding sharding) {
+        if (sharding == null) {
+            return new ArrayList<>();
+        }
         List<MapReduceConfig.ShardingInfo> shardingInfos = sharding.getInfos();
         List<FileSystemDO> fileSystemDOS = new ArrayList<>();
         if (shardingInfos == null || shardingInfos.isEmpty()) {
@@ -39,6 +42,9 @@ public class ConfigContextUtil {
     }
 
     public static MasterInfoDO convert2Master(MapReduceConfig.MasterInfo masterInfo) {
+        if (masterInfo == null) {
+            return new MasterInfoDO();
+        }
         String ip = masterInfo.getIp();
         String[] ipInfo = ip.split(":");
         MasterInfoDO masterInfoDO = new MasterInfoDO();
@@ -48,6 +54,9 @@ public class ConfigContextUtil {
     }
 
     public static Map<String, RpcDO> convert2Rpc(GrpcConfig grpc) {
+        if (grpc == null) {
+            return new HashMap<>();
+        }
         List<GrpcConfig.ServiceInfo> serviceInfos = grpc.getServices();
         Map<String, RpcDO> rpcDOS = new HashMap<>();
         for (GrpcConfig.ServiceInfo serviceInfo : serviceInfos) {

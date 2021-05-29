@@ -1,6 +1,7 @@
 package org.yinan.io;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONException;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
 import org.slf4j.Logger;
@@ -34,6 +35,8 @@ public class FileStreamUtil {
                     new OutputStreamWriter(
                             new FileOutputStream(file, false), StandardCharsets.UTF_8));
             writer.write(jsonString);
+            writer.flush();
+            writer.close();
         } catch (IOException e) {
             LOGGER.error("can not save file {}, error message is {}", fileName, e.toString());
             return false;
@@ -63,11 +66,14 @@ public class FileStreamUtil {
         return null;
     }
 
-    public static <T> T load(TypeReference<T> typeReference, String fileName) {
+    public static <T> T load(TypeReference<T> typeReference, String fileName, T t) {
         try {
             String jsonString  = readJsonFile(fileName);
+            if ("".equals(jsonString)) {
+                return t;
+            }
             return JSON.parseObject(jsonString, typeReference);
-        } catch (IOException e) {
+        } catch (Exception e) {
             LOGGER.error("load json to map error: {}", e.toString());
         }
         return null;

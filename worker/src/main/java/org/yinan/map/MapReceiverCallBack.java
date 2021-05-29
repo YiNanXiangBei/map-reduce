@@ -32,30 +32,33 @@ public class MapReceiverCallBack implements ICallBack<MapRemoteFileEntry> {
 
     private final static String MAP_RECEIVE_FILE = "MAP_RECEIVE_FILE_";
 
+    private final static String MAP_GENERATE_FILE = "MAP_GENERATE_FILE_";
+
+    /**
+     * 到这里说明请求没有问题，有问题的是结果
+     * @param mapRemoteFileEntry
+     */
     @Override
     public void call(MapRemoteFileEntry mapRemoteFileEntry) {
         //去指定ip获取文件，保存到本地
         LOGGER.info("node map receive message from master ...");
         String fileSystemIp = mapRemoteFileEntry.getRemoteIp();
         int fileSystemPort = mapRemoteFileEntry.getRemotePort();
-        String fileName = mapRemoteFileEntry.getFileLocation() + "/" + mapRemoteFileEntry.getFileName();
+        String fileName = mapRemoteFileEntry.getFileLocation();
         String username = mapRemoteFileEntry.getUsername();
         String password = mapRemoteFileEntry.getPassword();
-        String fileType = mapRemoteFileEntry.getFileName().split("\\.")[1];
-        String localFile = MAP_RECEIVE_FILE + count.getAndIncrement() + "." + fileType;
+        String fileType = mapRemoteFileEntry.getFileLocation().split("\\.")[1];
+        String localFile = MAP_RECEIVE_FILE + count + "." + fileType;
+        String mapGeneFile = MAP_GENERATE_FILE + count.getAndIncrement() + ".json";
         ShellUtils.scpDownload(fileSystemIp, fileSystemPort, username, password,
                 fileName, localFile);
         //调用用户实现的接口IMap
         IMap map = ProcessContext.getMap();
         long currentTime = System.currentTimeMillis();
-        String ip = null;
+        String ip = System.getProperty("user.host");
+        LOGGER.info("================== get local ip: {} ==================", ip);
         try {
-            ip = InetAddress.getLocalHost().getHostAddress();
-        } catch (UnknownHostException e) {
-            LOGGER.error("can not get current ip address !");
-        }
-        try {
-            Map<String, Object> results = map.map(FileStreamUtil.readJsonFile(localFile));
+            Map<String, Object> results = map.map(FileStreamUtil.readJsonFile(localFile), mapGeneFile);
             long spendTime = System.currentTimeMillis() - currentTime;
             List<String> keys = new ArrayList<>(results.keySet());
             //执行结果返回给master
@@ -64,12 +67,12 @@ public class MapReceiverCallBack implements ICallBack<MapRemoteFileEntry> {
                             MapBackFeedEntry
                                     .newBuilder()
                                     .setIp(ip)
-                                    .setFileSystemLocation(System.getProperty("user.dir") + "/" + localFile)
+                                    .setFileSystemLocation(fileSystemIp + "::" + fileName)
                                     .setSuccess(true)
                                     .setSpendTime((int) spendTime)
                                     .addDeaFiles(DealFile.newBuilder()
                                             .addAllKeys(keys)
-                                            .setFileName(fileName)
+                                            .setFileName(System.getProperty("user.dir") + "/" + mapGeneFile)
                                             .build())
                                     .build()
                     );

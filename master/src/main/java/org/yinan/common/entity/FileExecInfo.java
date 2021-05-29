@@ -40,5 +40,5 @@ public class FileExecInfo {
     /**
      * 处理的文件信息
      */
-    private List<DealFile> dealFiles;
+    private List<DetailFileInfo> dealFiles;
 }

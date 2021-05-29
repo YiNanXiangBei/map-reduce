@@ -1,5 +1,7 @@
 package org.yinan.config.context;
 
+import org.yinan.config.entity.GrpcConfig;
+import org.yinan.config.entity.MapReduceConfig;
 import org.yinan.config.entity.SystemConfig;
 import org.yinan.config.entity.message.FileSystemDO;
 import org.yinan.config.entity.message.MasterInfoDO;
@@ -8,6 +10,7 @@ import org.yinan.config.entity.message.WorkerInfoDO;
 import org.yinan.config.resolve.ConfigResolver;
 import org.yinan.config.resolve.IResolver;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -20,19 +23,25 @@ public class ConfigContext {
     private ConfigContext() {
         IResolver<SystemConfig> configResolver = new ConfigResolver();
         SystemConfig systemConfig = configResolver.resolve();
-        rpcInfos = ConfigContextUtil.convert2Rpc(systemConfig.getGrpc());
-        masterInfo = ConfigContextUtil.convert2Master(systemConfig.getMapReduce().getMaster());
-        fileSystems = ConfigContextUtil.convert2FileSystem(systemConfig.getMapReduce().getSharding());
-        workerInfos = ConfigContextUtil.convert2WorkerInfo(systemConfig.getMapReduce().getWorkers());
+        GrpcConfig grpcConfig = systemConfig.getGrpc();
+        if (grpcConfig != null) {
+            rpcInfos = ConfigContextUtil.convert2Rpc(grpcConfig);
+        }
+        MapReduceConfig mapReduceConfig = systemConfig.getMapReduce();
+        if (mapReduceConfig != null) {
+            masterInfo = ConfigContextUtil.convert2Master(systemConfig.getMapReduce().getMaster());
+            fileSystems = ConfigContextUtil.convert2FileSystem(systemConfig.getMapReduce().getSharding());
+            workerInfos = ConfigContextUtil.convert2WorkerInfo(systemConfig.getMapReduce().getWorkers());
+        }
     }
 
-    private final Map<String, RpcDO> rpcInfos;
+    private Map<String, RpcDO> rpcInfos = new HashMap<>();
 
-    private final MasterInfoDO masterInfo;
+    private MasterInfoDO masterInfo;
 
-    private final List<FileSystemDO> fileSystems;
+    private List<FileSystemDO> fileSystems;
 
-    private final List<WorkerInfoDO> workerInfos;
+    private List<WorkerInfoDO> workerInfos;
 
     public Map<String, RpcDO> getRpcInfos() {
         return rpcInfos;

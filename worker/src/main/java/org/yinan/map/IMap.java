@@ -15,6 +15,6 @@ public interface IMap {
      * @param message 这里使用string原因是，考虑到既然已经使用了mapreduce，那么到这里的文件肯定可以读到内存了
      * @return
      */
-    Map<String, Object> map(String message);
+    Map<String, Object> map(String message, String fileName);
 
 }

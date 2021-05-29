@@ -1,0 +1,9 @@
+grpc:
+  services:
+    -
+      name: worker
+      port: 8888
+
+map-reduce:
+  master:
+    ip: 192.168.1.2:9999 # 主节点只有一个

@@ -13,6 +13,10 @@ import org.yinan.rpc.service.impl.MasterReceiveServiceImpl;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author yinan
@@ -31,6 +35,16 @@ public class MasterReceiver extends MasterReceiveServiceImplBase {
     public final static String REDUCE_NOTIFY = "reduce_notify";
 
     private Server server;
+
+    private final Executor executor = Executors.newFixedThreadPool(3, new ThreadFactory() {
+        private int count = 0;
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread thread = new Thread(r);
+            thread.setName("master receiver thread " + count ++);
+            return thread;
+        }
+    });
 
     public MasterReceiver() {
         if (!hashInit) {
@@ -67,12 +81,18 @@ public class MasterReceiver extends MasterReceiveServiceImplBase {
     @SuppressWarnings("unchecked")
     public void mapNotify(MapBackFeedEntry request) {
         LOGGER.info("receive map worker info: {}", request.toString());
-        ((ICallBack<MapBackFeedEntry>) callBackMap.get(MAP_NOTIFY)).call(request);
+        executor.execute(() -> ((ICallBack<MapBackFeedEntry>) callBackMap.get(MAP_NOTIFY)).call(request));
     }
 
     @SuppressWarnings("unchecked")
     public void reduceNotify(ReduceBackFeedEntry request) {
         LOGGER.info("receive reduce worker info: {}", request.toString());
-        ((ICallBack<ReduceBackFeedEntry>) callBackMap.get(REDUCE_NOTIFY)).call(request);
+        executor.execute(() -> ((ICallBack<ReduceBackFeedEntry>) callBackMap.get(REDUCE_NOTIFY)).call(request));
+    }
+
+    public synchronized void stop() {
+        if (this.server != null) {
+            this.server.shutdown();
+        }
     }
 }

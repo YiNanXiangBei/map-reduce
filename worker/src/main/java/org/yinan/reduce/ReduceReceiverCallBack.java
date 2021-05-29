@@ -39,13 +39,8 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
         LOGGER.info("node reduce receive message from master ...");
         List<MapRemoteFileEntry> allMaps = reduceRemoteEntry.getMapDealInfoList();
         Map<String, Object> results = new HashMap<>();
-        String ip = null;
-        try {
-            ip = InetAddress.getLocalHost().getHostAddress();
-        } catch (UnknownHostException e) {
-            LOGGER.error("can not get current ip address !");
-        }
-        String finalIp = ip;
+        String ip = System.getProperty("user.host");
+        LOGGER.info("================== get local ip: {} ==================", ip);
         allMaps.forEach(mapNode -> {
             String mapIp = mapNode.getRemoteIp();
             Integer mapPort = mapNode.getRemotePort();
@@ -57,15 +52,17 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
                     + fileType;
             ShellUtils.scpDownload(mapIp, mapPort, userName, password,
                     fileName, localFile);
+            FileStreamUtil.save(new HashMap<>(), localFile);
             try {
-                Map<String, Object> mapContent = FileStreamUtil.load(new TypeReference<Map<String, Object>>() {}, localFile);
+                Map<String, Object> mapContent = FileStreamUtil.load(new TypeReference<Map<String, Object>>() {},
+                        localFile, new HashMap<>());
                 IReduce reduce = ProcessContext.getReduce();
                 results.putAll(reduce.reduce(mapContent, reduceRemoteEntry.getKeysList()));
             } catch (Exception e) {
                 LOGGER.error("load local file error: {}", e.toString());
                 new WorkerNotifyService()
                         .reduceNotify(ReduceBackFeedEntry.newBuilder()
-                                .setIp(finalIp)
+                                .setIp(ip)
                                 .setFinished(false)
                                 .setMessage("load file error, result may be not complete!")
                                 .build());

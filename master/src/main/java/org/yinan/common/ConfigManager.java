@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * @author yinan
@@ -65,12 +66,12 @@ public class ConfigManager {
     /**
      * 记录所有的key信息，key是由用户代码定义的，文件名 ALL_KEYS.json
      */
-    private final Set<String> ALL_KEYS = new HashSet<>();
+    private final Map<String, Set<String>> ALL_KEYS = new ConcurrentHashMap<>();
 
     /**
      * 处理完成reduce任务的机器，文件名 FINISHED_REDUCE_TASK.json
      */
-    private final List<String> FINISHED_REDUCE_TASK = new ArrayList<>();
+    private final Map<String, List<String>> FINISHED_REDUCE_TASK = new ConcurrentHashMap<>();
 
     /**
      * 记录什么reduce处理哪些key，文件名 REDUCE_KEY.json
@@ -170,6 +171,10 @@ public class ConfigManager {
         return FILE_DOING_OWNER.containsKey(key);
     }
 
+    public String getFileLocation(String key) {
+        return FILE_DOING_OWNER.get(key);
+    }
+
     public void addWorkerDoingFile(String key, String value) {
         OWNER_DOING_FILE.put(key, value);
     }
@@ -227,10 +232,18 @@ public class ConfigManager {
     }
 
     public void addAllKeys(List<String> keys) {
-        ALL_KEYS.addAll(keys);
+        ALL_KEYS.put(Constant.ALL_KEYS_KEY, new HashSet<>(keys));
+    }
+
+    public void addAllMapKeys(Map<String, Set<String>> keys) {
+        ALL_KEYS.putAll(keys);
     }
 
     public Set<String> getAllKeys() {
+        return ALL_KEYS.get(Constant.ALL_KEYS_KEY);
+    }
+
+    public Map<String, Set<String>> getAllMapKeys() {
         return ALL_KEYS;
     }
 
@@ -263,20 +276,22 @@ public class ConfigManager {
     }
 
     public void addFinishedReduceTask(String machine) {
-        FINISHED_REDUCE_TASK.add(machine);
+        FINISHED_REDUCE_TASK.getOrDefault(Constant.FINISHED_REDUCE_TASK_KEY,
+                new ArrayList<>()).add(machine);
     }
 
-    public void addAllFinishedReduceTasks(List<String> machines) {
-        FINISHED_REDUCE_TASK.addAll(machines);
+    public void addAllFinishedReduceTasks(Map<String, List<String>> machines) {
+        FINISHED_REDUCE_TASK.putAll(machines);
     }
 
     public List<String> getAllFinishedReduceTaskMachine() {
+        return FINISHED_REDUCE_TASK.get(Constant.FINISHED_REDUCE_TASK_KEY);
+    }
+
+    public Map<String, List<String>> getAllFinishedReduceMachines() {
         return FINISHED_REDUCE_TASK;
     }
 
-    public synchronized boolean removeFinishedReduceMachine(String key) {
-        return FINISHED_REDUCE_TASK.remove(key);
-    }
 
     public void addSceneSnapshot(String key, Boolean status) {
         SCENE_SNAPSHOT.put(key, status);

@@ -1,7 +1,4 @@
-package org.yinan.statistics.map;
-
-import org.yinan.io.FileStreamUtil;
-import org.yinan.map.IMap;
+package org.yinan.map;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -23,7 +20,6 @@ public class MapDemo implements IMap {
         results.put("test", 2);
         results.put("winson", 66);
         results.put("is", 7);
-        FileStreamUtil.save(results, fileName);
         return results;
     }
 }

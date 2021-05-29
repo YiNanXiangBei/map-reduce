@@ -10,6 +10,8 @@ map-reduce:
       ip: 192.168.1.102:8888
       region: 1
       room: 1
+      username: yinan
+      password: Q1w2e3r4t5
 #    -
 #      ip: 127.0.0.1:9090
 #      region: 2 # 地区

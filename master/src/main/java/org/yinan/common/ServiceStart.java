@@ -3,6 +3,7 @@ package org.yinan.common;
 import com.alibaba.fastjson.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.yinan.common.entity.DetailFileInfo;
 import org.yinan.common.entity.FileExecInfo;
 import org.yinan.common.entity.WorkerInfo;
 import org.yinan.config.context.ConfigContext;
@@ -24,10 +25,12 @@ import org.yinan.util.ConvertUtil;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -35,8 +38,12 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
@@ -58,11 +65,18 @@ public class ServiceStart {
      */
     private ScheduledFuture<?> reduceScheduleFuture;
 
+    /**
+     * syncsave 线程
+     */
+    private final ScheduledFuture<?> syncSaveScheduleFuture;
+
     private final ScheduledExecutorService scheduledExecutorService;
 
     private final static String FILE_FLAG = "FILE_FLAG";
 
     private ConfigManager configManager;
+
+    private final static String NONE = "NONE";
 
     private final static Logger LOGGER = LoggerFactory.getLogger(ServiceStart.class);
 
@@ -83,8 +97,26 @@ public class ServiceStart {
 
     public ServiceStart() {
         executor = new ThreadPoolExecutor(7, 15,
-                3000, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(100));
-        scheduledExecutorService = Executors.newScheduledThreadPool(3);
+                3000, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(100), new ThreadFactory() {
+            private int count = 0;
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread thread = new Thread(r);
+                thread.setName("notify worker thread " + count++);
+                return thread;
+            }
+        });
+        scheduledExecutorService = Executors.newScheduledThreadPool(3, new ThreadFactory() {
+            private int count = 0;
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread thread = new Thread(r);
+                thread.setName("schedule thread " + count ++);
+                return thread;
+            }
+        });
+        syncSaveScheduleFuture = scheduledExecutorService.scheduleAtFixedRate(this::saveSync, 100,
+                2000, TimeUnit.MILLISECONDS);
     }
 
     public void init() {
@@ -106,6 +138,8 @@ public class ServiceStart {
             //销毁之前创建的文件
             if (!FileStreamUtil.deleteFile(FILE_FLAG)) {
                 LOGGER.error("can not clear file: {}", FILE_FLAG);
+            } else {
+                LOGGER.info("all process has finished !");
             }
         }
     }
@@ -140,14 +174,26 @@ public class ServiceStart {
         //向所有节点推送jar包，并启动jar包
         for (Map.Entry<String, WorkerInfoDO> entry : ALIVE_WORKER.entrySet()) {
             WorkerInfoDO workerInfoDO = entry.getValue();
-            //注意这里端口写死为22
-            boolean success = ShellUtils.scpUpload(workerInfoDO.getIp(),
+            boolean success = false;
+            success = ShellUtils.scpUpload(workerInfoDO.getIp(),
                     22,
                     workerInfoDO.getUsername(),
                     workerInfoDO.getPassword(),
-                    "/home/map-reduce.jar",
+                    "/home/yinan/kill.sh",
+                    "kill.sh",
+                    "sh kill.sh"
+                    );
+            if (!success) {
+                continue;
+            }
+            //注意这里端口写死为22
+            success = ShellUtils.scpUpload(workerInfoDO.getIp(),
+                    22,
+                    workerInfoDO.getUsername(),
+                    workerInfoDO.getPassword(),
+                    "/home/yinan/map-reduce.jar",
                     "map-reduce.jar",
-                    "java -jar /home/map-reduce.jar");
+                    "java -jar -Duser.host=" + "\"" + workerInfoDO.getIp()+ "\" /home/yinan/map-reduce.jar");
             if (success) {
                 configManager.addAliveWorker(entry.getKey(), ConvertUtil.convert(entry.getValue()));
             }
@@ -183,13 +229,14 @@ public class ServiceStart {
      * 只有还在处理的任务需要初始化的
      */
     private void onlyProcessingTaskInit() {
-        //从文件中读取数据并塞到内存
-        load();
+
         //判断任务是否分配，如果任务还没有分配，执行初始化逻辑
         //任务已经分配，判断节点是否完成执行，若未完成，调用notify执行逻辑
         if (configManager.getSceneSnapshot(Constant.STARTED_TASK) == null) {
             onlyNewTaskInit();
         } else if (configManager.getSceneSnapshot(Constant.FINISHED_TASK) == null) {
+            //从文件中读取数据并塞到内存
+            load();
             notifyMapNode();
         }
     }
@@ -211,17 +258,13 @@ public class ServiceStart {
                     //表示某个map节点处理成功，将结果保存到map中，同时将处理成功的文件清除
                     //该location表示的是文件系统中的location
                     String fileLocation = mapBackFeedEntry.getFileSystemLocation();
-                    configManager.remove(fileLocation);
-                    configManager.removeFileOwner(ipPort);
-
                     List<DealFile> dealFileList = mapBackFeedEntry.getDeaFilesList();
-
                     FileExecInfo execInfo = new FileExecInfo();
                     execInfo.setRunId(ipPort);
                     execInfo.setStatus("success");
                     execInfo.setFileName(fileLocation);
                     execInfo.setExecTime(mapBackFeedEntry.getSpendTime());
-                    execInfo.setDealFiles(dealFileList);
+                    handleDetailFile(execInfo, mapBackFeedEntry.getDeaFilesList());
                     configManager.addSuccess(ip + "::" + fileLocation, execInfo);
                     //统计key值信息，不过多考虑，仅仅使用逗号分割key
                     List<String> keys = dealFileList
@@ -242,6 +285,9 @@ public class ServiceStart {
                                 .build()
                         );
                     });
+                    configManager.remove(fileLocation);
+                    configManager.removeFileOwner(ipPort);
+
                 } else {
                     checkMapRetryTimes(ipPort);
                 }
@@ -254,12 +300,17 @@ public class ServiceStart {
                 String ip = reduceBackFeedEntry.getIp();
                 //输出reduce结果
                 if (reduceBackFeedEntry.getFinished()) {
-                    System.out.println("reduce node :" + ip + "has finished," +
-                            "file has been saved in : " + reduceBackFeedEntry.getFileLocation());
+                    System.out.println("reduce node :" + ip + " has finished, " +
+                            "file has been saved in remote server: " + reduceBackFeedEntry.getFileLocation());
                     //清除该reduce节点任务
                     configManager.removeReduceKey(ip);
                     //标记该节点已完成任务
                     configManager.addFinishedReduceTask(ip);
+
+                    if (configManager.reduceKeyIsEmpty()) {
+                        masterReceiver.stop();
+                        syncSaveScheduleFuture.cancel(false);
+                    }
                 } else {
                     reduceFailDeal(ip);
                 }
@@ -272,10 +323,10 @@ public class ServiceStart {
 
     private void initFileOwner() {
         List<FileSystemDO> files = ConfigContext.getInstance().getFileSystems();
-        files.forEach(file -> {
+        for (FileSystemDO file : files) {
             //哪个文件由哪个worker负责
-            configManager.addWorkerDoingFile(file.getIp() + "::" + file.getLocation(), null);
-        });
+            configManager.addWorkerDoingFile(file.getIp() + "::" + file.getLocation(), NONE);
+        }
     }
 
 
@@ -287,14 +338,14 @@ public class ServiceStart {
         executor.execute(new NotifyMap());
         //心跳检测，每3秒钟检测一次
         mapScheduleFuture = scheduledExecutorService.scheduleAtFixedRate(new MapHeartBeatCheck(), 2000,
-                3000, TimeUnit.MILLISECONDS);
+                5000, TimeUnit.MILLISECONDS);
     }
 
     private void notifyReduceNode() {
         //通知reduce节点执行任务
         executor.execute(new NotifyReduce());
         reduceScheduleFuture = scheduledExecutorService.scheduleAtFixedRate(new ReduceHeartBeatCheck(), 2000,
-                3000, TimeUnit.MILLISECONDS);
+                5000, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -309,7 +360,7 @@ public class ServiceStart {
             //移除该节点执行文件信息
             configManager.removeFileOwner(ipPort);
             //将其正在执行的文件重置为未执行
-            configManager.addWorkerDoingFile(fileInfo, null);
+            configManager.addWorkerDoingFile(fileInfo, NONE);
             //从存活节点中移除
             configManager.removeMapWorker(ipPort);
         } else {
@@ -411,7 +462,7 @@ public class ServiceStart {
                 Map<String, String> ownerDoingFiles = configManager.allOwnerDoingFiles();
                 Map<String, List<FileSystemDO>> fileSystems = ConfigContext.getInstance().getMapFileSystems();
                 for (Map.Entry<String, String> entry : ownerDoingFiles.entrySet()) {
-                    if (entry.getValue() == null) {
+                    if (NONE.equals(entry.getValue())) {
                         //说明该文件还没有被处理
                         WorkerInfo worker = queue.poll();
                         //如果没有节点满足要求，自旋
@@ -439,6 +490,8 @@ public class ServiceStart {
                         configManager.addWorkerDoingFile(fileInfo, workerInfo);
                         //哪个worker处理哪个文件
                         configManager.addFileOwner(workerInfo, fileInfo);
+                        //处理结束放到队列中
+                        queue.offer(worker);
                     }
 
                 }
@@ -488,6 +541,7 @@ public class ServiceStart {
 
                 ReduceRemoteEntry reduceRemoteEntry = ReduceRemoteEntry.newBuilder()
                         .addAllMapDealInfo(mapRemoteFileEntries)
+                        .addAllKeys(subList)
                         .build();
                 new MasterNotifyService(workerInfo.getIp(), workerInfo.getPort())
                         .notifyReduce(reduceRemoteEntry);
@@ -534,15 +588,15 @@ public class ServiceStart {
        assert result;
        result = FileStreamUtil.save(configManager.getAllReduceWorkers(), Constant.REDUCE_WORKER_INFO);
        assert result;
-       result = FileStreamUtil.save(configManager.getAllAliveWorkerList(), Constant.ALIVE_WORKER);
+       result = FileStreamUtil.save(configManager.getAllAliveWorkers(), Constant.ALIVE_WORKER);
        assert result;
-       result = FileStreamUtil.save(configManager.getAllKeys(), Constant.ALL_KEYS);
+       result = FileStreamUtil.save(configManager.getAllMapKeys(), Constant.ALL_KEYS);
        assert result;
-       result = FileStreamUtil.save(configManager.getAllFinishedReduceTaskMachine(), Constant.FINISHED_REDUCE_TASK);
+       result = FileStreamUtil.save(configManager.getAllFinishedReduceMachines(), Constant.FINISHED_REDUCE_TASK);
        assert result;
        result = FileStreamUtil.save(configManager.getAllReduceKeys(), Constant.REDUCE_KEY);
        assert result;
-       result = FileStreamUtil.save(configManager.getAllSceneSnapshot(), Constant.REDUCE_KEY);
+       result = FileStreamUtil.save(configManager.getAllSceneSnapshot(), Constant.SCENE_SNAPSHOT);
        assert result;
     }
 
@@ -551,25 +605,25 @@ public class ServiceStart {
      */
     private void load() {
         configManager.addAllSuccess(FileStreamUtil.load(new TypeReference<Map<String, FileExecInfo>>() {},
-                Constant.SUCCESS_FILE));
+                Constant.SUCCESS_FILE, new ConcurrentHashMap<>()));
         configManager.addAllFileOwner(FileStreamUtil.load(new TypeReference<Map<String, String>>() {},
-                Constant.FILE_DOING_OWNER));
+                Constant.FILE_DOING_OWNER, new ConcurrentHashMap<>()));
         configManager.addAllWorkerDoingFiles(FileStreamUtil.load(new TypeReference<Map<String, String>>() {},
-                Constant.OWNER_DOING_FILE));
+                Constant.OWNER_DOING_FILE, new ConcurrentHashMap<>()));
         configManager.addAllMapWorkers(FileStreamUtil.load(new TypeReference<Map<String, WorkerInfo>>() {},
-                Constant.MAP_WORKER_INFO));
+                Constant.MAP_WORKER_INFO, new ConcurrentHashMap<>()));
         configManager.addAllReduceWorkers(FileStreamUtil.load(new TypeReference<Map<String, WorkerInfo>>() {},
-                Constant.REDUCE_WORKER_INFO));
+                Constant.REDUCE_WORKER_INFO, new ConcurrentHashMap<>()));
         configManager.addAllAliveWorkers(FileStreamUtil.load(new TypeReference<Map<String, WorkerInfo>>() {},
-                Constant.ALIVE_WORKER));
-        configManager.addAllKeys(FileStreamUtil.load(new TypeReference<List<String>>() {},
-                Constant.ALL_KEYS));
-        configManager.addAllFinishedReduceTasks(FileStreamUtil.load(new TypeReference<List<String>>() {},
-                Constant.FINISHED_REDUCE_TASK));
+                Constant.ALIVE_WORKER, new ConcurrentHashMap<>()));
+        configManager.addAllMapKeys(FileStreamUtil.load(new TypeReference<Map<String, Set<String>>>() {},
+                Constant.ALL_KEYS, new ConcurrentHashMap<>()));
+        configManager.addAllFinishedReduceTasks(FileStreamUtil.load(new TypeReference<Map<String, List<String>>>() {},
+                Constant.FINISHED_REDUCE_TASK, new ConcurrentHashMap<>()));
         configManager.addAllReduceKeys(FileStreamUtil.load(new TypeReference<Map<String, List<String>>>() {},
-                Constant.REDUCE_KEY));
+                Constant.REDUCE_KEY, new ConcurrentHashMap<>()));
         configManager.addAllSceneSnapshot(FileStreamUtil.load(new TypeReference<Map<String, Boolean>>() {},
-                Constant.SCENE_SNAPSHOT));
+                Constant.SCENE_SNAPSHOT, new ConcurrentHashMap<>()));
     }
 
 
@@ -581,5 +635,15 @@ public class ServiceStart {
         return WORKER_HEART_BEATS_INFOS.getOrDefault(ipInfo, 0L);
     }
 
+    private void handleDetailFile(FileExecInfo execInfo, List<DealFile> dealFiles) {
+        List<DetailFileInfo> fileInfos = new ArrayList<>();
+        dealFiles.forEach(dealFile -> {
+            DetailFileInfo fileInfo = new DetailFileInfo();
+            fileInfo.setFileName(dealFile.getFileName());
+            fileInfo.setKeys(dealFile.getKeysList());
+            fileInfos.add(fileInfo);
+        });
+        execInfo.setDealFiles(fileInfos);
+    }
 
 }

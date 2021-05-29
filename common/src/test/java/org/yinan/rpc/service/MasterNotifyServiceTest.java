@@ -41,6 +41,7 @@ public class MasterNotifyServiceTest {
                     .build();
             System.out.println(notifyService.notifyMap(request));
         }
+        System.out.println("success");
     }
 
     public @Test

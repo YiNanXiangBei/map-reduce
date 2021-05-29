@@ -16,6 +16,8 @@ import org.yinan.rpc.service.impl.WorkerReceiveServiceImpl;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * @author yinan
@@ -36,6 +38,8 @@ public class WorkerReceiver extends WorkerReceiveServiceGrpc.WorkerReceiveServic
     private final Map<String, ICallBack<?>> callBackMap = new HashMap<>();
 
     private Server server;
+
+    private final Executor executor = Executors.newFixedThreadPool(4);
 
     public WorkerReceiver() {
         if (!hashInit) {
@@ -71,20 +75,20 @@ public class WorkerReceiver extends WorkerReceiveServiceGrpc.WorkerReceiveServic
     @SuppressWarnings("unchecked")
     public void mapReceiveSender(MapRemoteFileEntry request) {
         LOGGER.info("receive map remote info: {}", request.toString());
-        ((ICallBack<MapRemoteFileEntry>) callBackMap.get(MAP_RECEIVER_SENDER)).call(request);
+        executor.execute(() -> ((ICallBack<MapRemoteFileEntry>) callBackMap.get(MAP_RECEIVER_SENDER)).call(request));
+
     }
 
     @SuppressWarnings("unchecked")
     public void reduceReceiveSender(ReduceRemoteEntry request) {
         LOGGER.info("receive reduce remote info: {}", request.toString());
-        ((ICallBack<ReduceRemoteEntry>) callBackMap.get(REDUCE_RECEIVER_SENDER)).call(request);
-
+        executor.execute(() -> ((ICallBack<ReduceRemoteEntry>) callBackMap.get(REDUCE_RECEIVER_SENDER)).call(request));
     }
 
     @SuppressWarnings("unchecked")
     public void heartBeat(HeartBeatInfo request) {
         LOGGER.info("receive heart beat info: {}", request.toString());
-        ((ICallBack<HeartBeatInfo>) callBackMap.get(HEART_BEAT)).call(request);
+        executor.execute(() -> ((ICallBack<HeartBeatInfo>) callBackMap.get(HEART_BEAT)).call(request));
     }
 
 }

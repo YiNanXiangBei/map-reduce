@@ -32,10 +32,9 @@ public class ConfigResolver implements IResolver<SystemConfig> {
     @Override
     public SystemConfig resolve(String fileName) {
         Yaml yaml = new Yaml(new AnnotationAwareConstructor(SystemConfig.class));
-        InputStream inputStream = this.getClass()
-                .getClassLoader()
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        InputStream inputStream = classLoader
                 .getResourceAsStream(fileName);
-//        Map<String, Object> object = yaml.load(inputStream);
         return yaml.loadAs(inputStream, SystemConfig.class);
     }
 }
