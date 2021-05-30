@@ -41,6 +41,7 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
         Map<String, Object> results = new HashMap<>();
         String currentIp = System.getProperty("user.host");
         LOGGER.info("================== get local ip: {} ==================", currentIp);
+        long currentTime = System.currentTimeMillis();
         allMaps.forEach(mapNode -> {
             String mapIp = mapNode.getRemoteIp();
             Integer mapPort = mapNode.getRemotePort();
@@ -89,6 +90,7 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
         new WorkerNotifyService()
                 .reduceNotify(ReduceBackFeedEntry.newBuilder()
                         .setIp(currentIp)
+                        .setSpendTime((int) (System.currentTimeMillis() - currentTime))
                         .setFinished(success)
                         .setFileLocation(System.getProperty("user.dir") + "/" + REDUCE_RESULT)
                         .build());

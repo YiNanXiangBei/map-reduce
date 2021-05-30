@@ -38,6 +38,8 @@ message ReduceBackFeedEntry {
   string message = 3;
   //执行数据的机器ip
   string ip = 4;
+  //花费时间
+  int32 spend_time = 5;
 }
 
 

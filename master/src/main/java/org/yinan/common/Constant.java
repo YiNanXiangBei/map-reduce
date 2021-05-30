@@ -33,4 +33,6 @@ public class Constant {
     public final static String FINISHED_REDUCE_TASK_KEY = "FINISHED_REDUCE_TASK_KEY";
 
     public final static String ALL_KEYS_KEY = "ALL_KEYS_KEY";
+
+    public final static String REDUCE_SPEND_TIMES = "REDUCE_SPEND_TIMES";
 }

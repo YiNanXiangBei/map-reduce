@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -91,6 +92,26 @@ public class ServiceStart {
      * 如果出现节点三次没有响应，那么直接将该节点丢弃
      */
     private final Map<String, Long> WORKER_HEART_BEATS_INFOS = new ConcurrentHashMap<>();
+
+    /**
+     * map节点平均响应时间
+     */
+    private volatile int mapSpendTime = 0;
+
+    /**
+     * 成功执行Map任务的节点数量
+     */
+    private volatile int mapCounts = 0;
+
+    /**
+     * reduce节点平均响应时间
+     */
+    private volatile int reduceSpnedTime = 0;
+
+    /**
+     * 成功执行任务的节点数量
+     */
+    private volatile int reduceCounts = 0;
 
     public ServiceStart() {
         executor = new ThreadPoolExecutor(7, 15,
@@ -236,6 +257,7 @@ public class ServiceStart {
         } else if (configManager.getSceneSnapshot(Constant.FINISHED_TASK) == null) {
             //从文件中读取数据并塞到内存
             load();
+            initSpendTime();
             notifyMapNode();
         }
     }
@@ -263,6 +285,7 @@ public class ServiceStart {
                     execInfo.setStatus("success");
                     execInfo.setFileName(fileLocation);
                     execInfo.setExecTime(mapBackFeedEntry.getSpendTime());
+                    handleMapSpendTime(mapBackFeedEntry.getSpendTime());
                     handleDetailFile(execInfo, mapBackFeedEntry.getDeaFilesList());
                     configManager.addSuccess(ip + "::" + fileLocation, execInfo);
                     //统计key值信息
@@ -305,7 +328,8 @@ public class ServiceStart {
                     configManager.removeReduceKey(ip);
                     //标记该节点已完成任务
                     configManager.addFinishedReduceTask(ip);
-
+                    configManager.addReduceSpendTime(ip, reduceBackFeedEntry.getSpendTime());
+                    handleReduceSpendTime(reduceBackFeedEntry.getSpendTime());
                     if (configManager.reduceKeyIsEmpty()) {
                         masterReceiver.stop();
                         syncSaveScheduleFuture.cancel(false);
@@ -430,7 +454,7 @@ public class ServiceStart {
         @Override
         public void run() {
             if (!configManager.reduceKeyIsEmpty()) {
-                //不为空发送心跳检测，表面reduce任务开始执行
+                //不为空发送心跳检测，表示reduce任务开始执行
                 //map节点心跳检测
                 long currentTime = System.currentTimeMillis();
                 configManager.getAllReduceWorkers().values().forEach(info -> {
@@ -589,6 +613,37 @@ public class ServiceStart {
         configManager.removeReduceKey(oldIp);
     }
 
+    /**
+     * 处理超时任务，在指定时间段内没有处理完成需要换节点执行
+     */
+    class TimeoutHandle implements Runnable {
+        private Map<String, String> mapVisited = new HashMap<>();
+        private Map<String, List<String>> reduceVisited = new HashMap<>();
+        @Override
+        public void run() {
+            //map节点处理任务
+            //从执行任务的节点中获取该节点处理开始时间，
+            //判断已执行时间是否超过平均时间
+            //如果没有，则忽略，否则将该任务从对应节点上解绑，然后让额外线程去处理即可
+            //考虑到可能所有节点都已经重试过一轮，那么停止重试，直接忽略
+            if (configManager.workerDoingFileIsNotEmpty()) {
+                Map<String, String> allFileDoingOwner = configManager.getAllFileDoingOwner();
+                for (Map.Entry<String, String> entry : allFileDoingOwner.entrySet()) {
+                    String workFile = mapVisited.get(entry.getKey());
+                    if (workFile == null || !workFile.equals(entry.getValue())) {
+                        //说明没有被访问过
+                        mapVisited.put(entry.getKey(), entry.getValue());
+
+                    }
+                }
+            }
+            //reduce节点
+            else if (!configManager.reduceKeyIsEmpty()) {
+
+            }
+
+        }
+    }
 
     /**
      * 异步持久化数据
@@ -613,6 +668,8 @@ public class ServiceStart {
        result = FileStreamUtil.save(configManager.getAllReduceKeys(), Constant.REDUCE_KEY);
        assert result;
        result = FileStreamUtil.save(configManager.getAllSceneSnapshot(), Constant.SCENE_SNAPSHOT);
+       assert result;
+       result = FileStreamUtil.save(configManager.getAllReduceSpendTime(), Constant.REDUCE_SPEND_TIMES);
        assert result;
     }
 
@@ -640,6 +697,8 @@ public class ServiceStart {
                 Constant.REDUCE_KEY, new ConcurrentHashMap<>()));
         configManager.addAllSceneSnapshot(FileStreamUtil.load(new TypeReference<Map<String, Boolean>>() {},
                 Constant.SCENE_SNAPSHOT, new ConcurrentHashMap<>()));
+        configManager.reduceSpendTimeAddAll(FileStreamUtil.load(new TypeReference<Map<String, Integer>>() {},
+                Constant.REDUCE_SPEND_TIMES, new ConcurrentHashMap<>()));
     }
 
 
@@ -660,6 +719,31 @@ public class ServiceStart {
             fileInfos.add(fileInfo);
         });
         execInfo.setDealFiles(fileInfos);
+    }
+
+    private synchronized void handleMapSpendTime(Integer responseTime) {
+        mapSpendTime += responseTime;
+        mapCounts += 1;
+    }
+
+    private synchronized void handleReduceSpendTime(Integer responseTime) {
+        reduceCounts += 1;
+        reduceSpnedTime += responseTime;
+    }
+
+    private synchronized void initSpendTime() {
+        Map<String, FileExecInfo> success = configManager.getAllSuccess();
+        mapCounts = success.size();
+        for (Map.Entry<String, FileExecInfo> entry : success.entrySet()) {
+            mapSpendTime += entry.getValue().getExecTime();
+        }
+
+        Map<String, Integer> reduce = configManager.getAllReduceSpendTime();
+        reduceCounts = reduce.size();
+        for (Map.Entry<String, Integer> entry : reduce.entrySet()) {
+            reduceSpnedTime += entry.getValue();
+        }
+
     }
 
 }

@@ -83,6 +83,22 @@ public class ConfigManager {
      */
     private final Map<String, Boolean> SCENE_SNAPSHOT = new ConcurrentHashMap<>();
 
+    /**
+     * reduce节点处理任务花费时间
+     */
+    private final Map<String, Integer> REDUCE_NODE_SPEND_TIME = new ConcurrentHashMap<>();
+
+    /**
+     * map工作开始时间
+     */
+    private final Map<String, Long> MAP_WORKER_START_TIME = new ConcurrentHashMap<>();
+
+    /**
+     * reduce工作开始时间
+     */
+    private final Map<String, Long> REDUCE_WORKER_START_TIME = new ConcurrentHashMap<>();
+
+
 
     public void addAllSuccess(Map<String, FileExecInfo> workerInfoMap) {
         SUCCESS_FILE.putAll(workerInfoMap);
@@ -311,4 +327,23 @@ public class ConfigManager {
     public Boolean getSceneSnapshot(String key) {
         return SCENE_SNAPSHOT.get(key);
     }
+
+
+    public void addReduceSpendTime(String key, Integer time) {
+        Integer averageTime = REDUCE_NODE_SPEND_TIME.get(key);
+        if (averageTime != null) {
+            time = (averageTime + time) / 2;
+        }
+        REDUCE_NODE_SPEND_TIME.put(key, time);
+    }
+
+    public void reduceSpendTimeAddAll(Map<String, Integer> times) {
+        REDUCE_NODE_SPEND_TIME.putAll(times);
+    }
+
+    public Map<String, Integer> getAllReduceSpendTime() {
+        return REDUCE_NODE_SPEND_TIME;
+    }
+
+
 }
