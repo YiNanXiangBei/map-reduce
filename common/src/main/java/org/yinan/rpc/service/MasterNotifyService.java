@@ -21,11 +21,13 @@ public class MasterNotifyService {
 
     private final WorkerReceiveServiceGrpc.WorkerReceiveServiceBlockingStub blockingStub;
 
+    private final ManagedChannel channel;
+
     public MasterNotifyService(String ip, Integer port) {
         ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder
                 .forAddress(ip, port)
                 .usePlaintext();
-        ManagedChannel channel = channelBuilder.build();
+        channel = channelBuilder.build();
         this.blockingStub = WorkerReceiveServiceGrpc.newBlockingStub(channel);
     }
 
@@ -39,6 +41,10 @@ public class MasterNotifyService {
                     .setCode(500)
                     .setMessage("can not connect map worker")
                     .build();
+        } finally {
+            if (channel != null) {
+                channel.shutdown();
+            }
         }
     }
 

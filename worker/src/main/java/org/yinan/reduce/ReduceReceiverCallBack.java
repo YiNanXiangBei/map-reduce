@@ -39,8 +39,8 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
         LOGGER.info("node reduce receive message from master ...");
         List<MapRemoteFileEntry> allMaps = reduceRemoteEntry.getMapDealInfoList();
         Map<String, Object> results = new HashMap<>();
-        String ip = System.getProperty("user.host");
-        LOGGER.info("================== get local ip: {} ==================", ip);
+        String currentIp = System.getProperty("user.host");
+        LOGGER.info("================== get local ip: {} ==================", currentIp);
         allMaps.forEach(mapNode -> {
             String mapIp = mapNode.getRemoteIp();
             Integer mapPort = mapNode.getRemotePort();
@@ -50,9 +50,25 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
             String fileType = "." + fileName.split("\\.")[1];
             String localFile = mapIp + REDUCE_FILE + atomicInteger.incrementAndGet()
                     + fileType;
-            ShellUtils.scpDownload(mapIp, mapPort, userName, password,
-                    fileName, localFile);
-            FileStreamUtil.save(new HashMap<>(), localFile);
+            if (!mapIp.equals(currentIp)) {
+                LOGGER.info("download from remote map ip : {}, port: {}, remote file name: {}, local file name: {}",
+                        mapIp, mapPort, fileName, localFile);
+                ShellUtils.scpDownload(mapIp, mapPort, userName, password,
+                        fileName, localFile);
+            } else {
+                LOGGER.info("download from local map ip : {}, port: {}, remote file name: {}, local file name: {}",
+                        mapIp, mapPort, fileName, localFile);
+                if (!ShellUtils.cp(fileName, localFile)) {
+                    //复制文件失败
+                    new WorkerNotifyService()
+                            .reduceNotify(ReduceBackFeedEntry.newBuilder()
+                                    .setIp(currentIp)
+                                    .setFinished(false)
+                                    .setMessage("load file error, result may be not complete!")
+                                    .build());
+                    return;
+                }
+            }
             try {
                 Map<String, Object> mapContent = FileStreamUtil.load(new TypeReference<Map<String, Object>>() {},
                         localFile, new HashMap<>());
@@ -62,7 +78,7 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
                 LOGGER.error("load local file error: {}", e.toString());
                 new WorkerNotifyService()
                         .reduceNotify(ReduceBackFeedEntry.newBuilder()
-                                .setIp(ip)
+                                .setIp(currentIp)
                                 .setFinished(false)
                                 .setMessage("load file error, result may be not complete!")
                                 .build());
@@ -72,7 +88,7 @@ public class ReduceReceiverCallBack implements ICallBack<ReduceRemoteEntry> {
         boolean success = FileStreamUtil.save(results, REDUCE_RESULT);
         new WorkerNotifyService()
                 .reduceNotify(ReduceBackFeedEntry.newBuilder()
-                        .setIp(ip)
+                        .setIp(currentIp)
                         .setFinished(success)
                         .setFileLocation(System.getProperty("user.dir") + "/" + REDUCE_RESULT)
                         .build());

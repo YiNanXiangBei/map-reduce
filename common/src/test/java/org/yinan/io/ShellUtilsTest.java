@@ -2,6 +2,7 @@ package org.yinan.io;
 
 import net.schmizz.sshj.SSHClient;
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.net.telnet.TelnetClient;
 import org.junit.Test;
 
@@ -49,5 +50,11 @@ public class ShellUtilsTest {
         sshClient.authPassword("yinan", "Q1w2e3r4t5");
         assertTrue(ShellUtils.exec(sshClient, "touch /home/yinan/11.txt"));
         sshClient.close();
+    }
+
+    @Test
+    public void chomp() {
+        assertEquals("111", StringUtils.chomp("111\n".toLowerCase()));
+        assertNotEquals("111", "111\n");
     }
 }

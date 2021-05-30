@@ -232,7 +232,10 @@ public class ConfigManager {
     }
 
     public void addAllKeys(List<String> keys) {
-        ALL_KEYS.put(Constant.ALL_KEYS_KEY, new HashSet<>(keys));
+        Set<String> keySets = ALL_KEYS.getOrDefault(Constant.ALL_KEYS_KEY,
+                new HashSet<>());
+        keySets.addAll(keys);
+        ALL_KEYS.put(Constant.ALL_KEYS_KEY, keySets);
     }
 
     public void addAllMapKeys(Map<String, Set<String>> keys) {

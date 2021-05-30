@@ -41,9 +41,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
@@ -135,6 +132,7 @@ public class ServiceStart {
             LOGGER.error("can not start master : {}", e.toString());
         } finally {
             configManager.addSceneSnapshot(Constant.FINISHED_TASK, true);
+            saveSync();
             //销毁之前创建的文件
             if (!FileStreamUtil.deleteFile(FILE_FLAG)) {
                 LOGGER.error("can not clear file: {}", FILE_FLAG);
@@ -179,7 +177,7 @@ public class ServiceStart {
                     22,
                     workerInfoDO.getUsername(),
                     workerInfoDO.getPassword(),
-                    "/home/yinan/kill.sh",
+                    "/home/"+ workerInfoDO.getUsername() +"/kill.sh",
                     "kill.sh",
                     "sh kill.sh"
                     );
@@ -191,9 +189,10 @@ public class ServiceStart {
                     22,
                     workerInfoDO.getUsername(),
                     workerInfoDO.getPassword(),
-                    "/home/yinan/map-reduce.jar",
+                    "/home/"+ workerInfoDO.getUsername() +"/map-reduce.jar",
                     "map-reduce.jar",
-                    "java -jar -Duser.host=" + "\"" + workerInfoDO.getIp()+ "\" /home/yinan/map-reduce.jar");
+                    "source /etc/profile;java -jar -Duser.host=" + "\"" + workerInfoDO.getIp()+ "\" -Dlog.path=\"" + "/home/" +
+                            workerInfoDO.getUsername() + "/logs\" /home/" + workerInfoDO.getUsername() +"/map-reduce.jar");
             if (success) {
                 configManager.addAliveWorker(entry.getKey(), ConvertUtil.convert(entry.getValue()));
             }
@@ -266,7 +265,7 @@ public class ServiceStart {
                     execInfo.setExecTime(mapBackFeedEntry.getSpendTime());
                     handleDetailFile(execInfo, mapBackFeedEntry.getDeaFilesList());
                     configManager.addSuccess(ip + "::" + fileLocation, execInfo);
-                    //统计key值信息，不过多考虑，仅仅使用逗号分割key
+                    //统计key值信息
                     List<String> keys = dealFileList
                             .stream()
                             .map(DealFile::getKeysList)
@@ -386,6 +385,7 @@ public class ServiceStart {
      * map节点心跳检测类
      */
     class MapHeartBeatCheck implements Runnable {
+        private Map<String, MasterNotifyService> mapInfo = new HashMap<>();
 
         @Override
         public void run() {
@@ -394,7 +394,14 @@ public class ServiceStart {
                 long currentTime = System.currentTimeMillis();
                 configManager.getAllMapWorkers().values().forEach(info -> {
                     String ipPort = info.getIp() + "::" + info.getPort();
-                    ResultInfo resultInfo = new MasterNotifyService(info.getIp(), info.getPort())
+                    MasterNotifyService notifyService;
+                    if (!mapInfo.containsKey(ipPort)) {
+                        notifyService = new MasterNotifyService(info.getIp(), info.getPort());
+                        mapInfo.put(ipPort, notifyService);
+                    } else {
+                        notifyService = mapInfo.get(ipPort);
+                    }
+                    ResultInfo resultInfo = notifyService
                             .heartBeat(HeartBeatInfo.newBuilder()
                                     .setCurrentRenewal(currentTime)
                                     .setLastRenewal(lastHeartBeatRenew(ipPort))
@@ -482,8 +489,17 @@ public class ServiceStart {
                                 .setPassword(file.getPassword())
                                 .build();
 
-                        new MasterNotifyService(worker.getIp(), worker.getPort())
+                        ResultInfo resultInfo = new MasterNotifyService(worker.getIp(), worker.getPort())
                                 .notifyMap(remoteFileEntry);
+                        while (!resultInfo.getSuccess()) {
+                            try {
+                                TimeUnit.MILLISECONDS.sleep(5000);
+                            } catch (InterruptedException e) {
+                                //ignore
+                            }
+                            resultInfo = new MasterNotifyService(worker.getIp(), worker.getPort())
+                                    .notifyMap(remoteFileEntry);
+                        }
                         String workerInfo = worker.getIp() + "::" + worker.getPort();
                         String fileInfo = entry.getKey();
                         //哪个文件被哪个worker处理

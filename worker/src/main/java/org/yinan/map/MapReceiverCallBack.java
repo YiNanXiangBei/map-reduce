@@ -50,15 +50,29 @@ public class MapReceiverCallBack implements ICallBack<MapRemoteFileEntry> {
         String fileType = mapRemoteFileEntry.getFileLocation().split("\\.")[1];
         String localFile = MAP_RECEIVE_FILE + count + "." + fileType;
         String mapGeneFile = MAP_GENERATE_FILE + count.getAndIncrement() + ".json";
-        ShellUtils.scpDownload(fileSystemIp, fileSystemPort, username, password,
-                fileName, localFile);
+        String currentIp = System.getProperty("user.host");
+
+        if (!fileSystemIp.equals(currentIp)) {
+            boolean isDownload = ShellUtils.scpDownload(fileSystemIp, fileSystemPort, username, password,
+                    fileName, localFile);
+            if (!isDownload) {
+                handleError(currentIp);
+                return;
+            }
+        } else {
+            if (!ShellUtils.cp(fileName, localFile)) {
+                handleError(currentIp);
+                return;
+            }
+        }
+
         //调用用户实现的接口IMap
         IMap map = ProcessContext.getMap();
         long currentTime = System.currentTimeMillis();
-        String ip = System.getProperty("user.host");
-        LOGGER.info("================== get local ip: {} ==================", ip);
+        LOGGER.info("================== get local ip: {} ==================", currentIp);
         try {
             Map<String, Object> results = map.map(FileStreamUtil.readJsonFile(localFile), mapGeneFile);
+            LOGGER.info("get from remote {}, key size is {}", fileSystemIp, results.size());
             long spendTime = System.currentTimeMillis() - currentTime;
             List<String> keys = new ArrayList<>(results.keySet());
             //执行结果返回给master
@@ -66,7 +80,7 @@ public class MapReceiverCallBack implements ICallBack<MapRemoteFileEntry> {
                     .mapNotify(
                             MapBackFeedEntry
                                     .newBuilder()
-                                    .setIp(ip)
+                                    .setIp(currentIp)
                                     .setFileSystemLocation(fileSystemIp + "::" + fileName)
                                     .setSuccess(true)
                                     .setSpendTime((int) spendTime)
@@ -82,9 +96,19 @@ public class MapReceiverCallBack implements ICallBack<MapRemoteFileEntry> {
                     .mapNotify(
                             MapBackFeedEntry
                                     .newBuilder()
-                                    .setIp(ip)
+                                    .setIp(currentIp)
                                     .setSuccess(false)
                                     .build());
         }
+    }
+
+    private void handleError(String currentIp) {
+        new WorkerNotifyService()
+                .mapNotify(
+                        MapBackFeedEntry
+                                .newBuilder()
+                                .setIp(currentIp)
+                                .setSuccess(false)
+                                .build());
     }
 }

@@ -8,13 +8,7 @@ import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
 import org.apache.commons.net.telnet.TelnetClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.util.Enumeration;
 
 /**
  * @author yinan
@@ -130,28 +124,19 @@ public class ShellUtils {
         return true;
     }
 
-    public static String getIpAddress() throws UnknownHostException {
+    public static boolean cp(String from, String to) {
         try {
-            Enumeration<NetworkInterface> allNetInterfaces = NetworkInterface.getNetworkInterfaces();
-            InetAddress ip = null;
-            while (allNetInterfaces.hasMoreElements()) {
-                NetworkInterface netInterface = (NetworkInterface) allNetInterfaces.nextElement();
-                if (netInterface.isLoopback() || netInterface.isVirtual() || !netInterface.isUp()) {
-                    continue;
-                } else {
-                    Enumeration<InetAddress> addresses = netInterface.getInetAddresses();
-                    while (addresses.hasMoreElements()) {
-                        ip = addresses.nextElement();
-                        if (ip != null) {
-                            return ip.getHostAddress();
-                        }
-                    }
-                }
+            Process exec = Runtime.getRuntime().exec("cp " + from + " " + to);
+            int status = exec.waitFor();
+            if (status == 0) {
+                return true;
             }
-        } catch (Exception e) {
-            LOGGER.error("get local ip error: {}", e.toString());
+        } catch (IOException | InterruptedException e) {
+            LOGGER.error("can not execute cp command");
         }
-        return InetAddress.getLocalHost().getHostAddress();
+        return false;
     }
+
+
 
 }

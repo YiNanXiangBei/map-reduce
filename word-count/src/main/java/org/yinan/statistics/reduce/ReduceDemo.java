@@ -2,9 +2,11 @@ package org.yinan.statistics.reduce;
 
 import org.yinan.reduce.IReduce;
 
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * @author yinan
@@ -19,7 +21,12 @@ public class ReduceDemo implements IReduce {
      */
     @Override
     public Map<String, Object> reduce(Map<String, Object> content, List<String> keys) {
-        Map<String, Object> results = new HashMap<>();
+        Map<String, Object> results = new TreeMap<>(new Comparator<String>() {
+            @Override
+            public int compare(String o1, String o2) {
+                return o1.compareTo(o2);
+            }
+        });
         for(Map.Entry<String, Object> entry : content.entrySet()) {
             if (keys.contains(entry.getKey())) {
                 results.put(entry.getKey(), entry.getValue());
