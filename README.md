@@ -1,2 +1,2 @@
 # map-reduce
-map-reduce demo
+map-reduce 学习与实现，基本功能完成
